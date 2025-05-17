@@ -1,0 +1,17 @@
+nats_url: "nats://localhost:4222"
+redis_addr: "redis://localhost:6379"
+dedup_ttl: "300s" # 5 minutes
+js_cdc_stream_name: "cdc_events_stream"
+js_wa_stream_name: "wa_stream"
+js_cdc_consumer_group: "cdc_consumers"
+js_ack_wait: "30s"
+js_max_deliver: 3
+js_max_ack_pending: 5000
+workers: 0
+workers_multiplier: 4
+min_workers: 2
+log_level: "info"
+metrics_port: "8080"
+js_cdc_stream_subjects: "cdc.*.*"
+js_wa_stream_subjects: "wa.>"
+panic_guard_failure_threshold_duration: "15m" # 15 minutes 
