@@ -72,7 +72,7 @@ func NewJetStreamIngester(
 	if err != nil {
 		if err == nats.ErrStreamNotFound {
 			logger.Info(context.Background(), "Stream not found, creating it", zap.String("stream_name", streamName), zap.Strings("subjects", streamSubjects))
-			_, streamAddErr := js.AddStream(&nats.StreamConfig{
+			createdStreamInfo, streamAddErr := js.AddStream(&nats.StreamConfig{
 				Name:      streamName,
 				Subjects:  streamSubjects,
 				Storage:   nats.FileStorage,
@@ -83,7 +83,8 @@ func NewJetStreamIngester(
 				// Not closing nc here as it's managed externally
 				return nil, fmt.Errorf("failed to create stream %s: %w", streamName, streamAddErr)
 			}
-			logger.Info(context.Background(), "Stream created successfully", zap.String("stream_name", streamName))
+			streamInfo = createdStreamInfo
+			logger.Info(context.Background(), "Stream created successfully and streamInfo updated", zap.String("stream_name", streamName))
 		} else {
 			logger.Error(context.Background(), "Failed to get stream info", zap.Error(err), zap.String("stream_name", streamName))
 			return nil, fmt.Errorf("failed to get stream info for %s: %w", streamName, err)
@@ -122,7 +123,7 @@ func NewJetStreamIngester(
 			zap.String("consumer_name", consumerName),
 		)
 		filterSubject := streamSubjects[0] // Default to first subject in list if multiple
-		if len(streamInfo.Config.Subjects) > 0 {
+		if streamInfo != nil && len(streamInfo.Config.Subjects) > 0 {
 			// More robust: if stream has multiple subjects, ensure consumer filter matches one, or is a wildcard.
 			// For simplicity, AddConsumer will use this filterSubject. If streamSubjects has "cdc.*.*", this is fine.
 			// If streamSubjects is e.g. "cdc.co1.tbl1,cdc.co2.tbl2", consumer needs specific filter or a broader one.
@@ -130,12 +131,14 @@ func NewJetStreamIngester(
 		}
 
 		_, consumerAddErr := js.AddConsumer(streamName, &nats.ConsumerConfig{
-			Durable:       consumerName,
-			AckPolicy:     nats.AckExplicitPolicy,
-			FilterSubject: filterSubject,
-			AckWait:       ackWait,
-			MaxAckPending: maxAckPending,
-			MaxDeliver:    maxDeliver,
+			Durable:        consumerName,
+			AckPolicy:      nats.AckExplicitPolicy,
+			FilterSubject:  filterSubject,
+			AckWait:        ackWait,
+			MaxAckPending:  maxAckPending,
+			MaxDeliver:     maxDeliver,
+			DeliverPolicy:  nats.DeliverAllPolicy, // Specify delivery policy for push consumer
+			DeliverSubject: nats.NewInbox(),       // Crucial for making it a push consumer for QueueSubscribe
 		})
 		if consumerAddErr != nil {
 			logger.Error(context.Background(), "Failed to create/update consumer", zap.Error(consumerAddErr), zap.String("consumer_name", consumerName))
