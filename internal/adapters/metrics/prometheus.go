@@ -114,6 +114,12 @@ func StartMetricsServer(metricsPort string) *http.Server {
 	// It's conventional for the metrics path to be /metrics
 	hmux := http.NewServeMux()
 	hmux.Handle("/metrics", promhttp.Handler())
+	hmux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Consider a more structured health response if needed in the future
+		_, _ = w.Write([]byte(`{"status": "ok"}`))
+	})
 
 	srv := &http.Server{
 		Addr:    ":" + metricsPort, // e.g. ":8080"
@@ -175,6 +181,11 @@ func NewPrometheusSink(
 		// Simple placeholder handler
 		_, _ = w.Write([]byte("# Placeholder /metrics endpoint. Real Prometheus metrics go here.\n"))
 		_, _ = w.Write([]byte("cdc_consumer_stub_metric 1\n"))
+	})
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "ok"}`))
 	})
 
 	server := &http.Server{

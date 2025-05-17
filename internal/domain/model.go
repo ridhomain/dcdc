@@ -6,6 +6,32 @@ import (
 	"time"
 )
 
+const customDateLayout = "2006-01-02"
+
+// CustomDate is a wrapper around time.Time to handle "YYYY-MM-DD" format.
+type CustomDate struct {
+	time.Time
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface.
+func (cd *CustomDate) UnmarshalJSON(b []byte) (err error) {
+	s := strings.Trim(string(b), "\"")
+	if s == "null" || s == "" { // Handle null or empty string as zero time
+		cd.Time = time.Time{}
+		return
+	}
+	cd.Time, err = time.Parse(customDateLayout, s)
+	return
+}
+
+// MarshalJSON implements the json.Marshaler interface.
+func (cd CustomDate) MarshalJSON() ([]byte, error) {
+	if cd.Time.IsZero() {
+		return []byte("null"), nil
+	}
+	return []byte("\"" + cd.Time.Format(customDateLayout) + "\""), nil
+}
+
 // EventID represents a unique identifier for a CDC event, typically in the format LSN:table:PK.
 type EventID string
 
@@ -134,7 +160,7 @@ type MessageData struct {
 	Status           string      `json:"status,omitempty"`
 	IsDeleted        bool        `json:"is_deleted,omitempty"`
 	MessageTimestamp int64       `json:"message_timestamp,omitempty"`
-	MessageDate      time.Time   `json:"message_date"` // Assuming it's not omitempty since not null
+	MessageDate      CustomDate  `json:"message_date"` // Assuming it's not omitempty since not null
 	CreatedAt        time.Time   `json:"created_at,omitempty"`
 	UpdatedAt        time.Time   `json:"updated_at,omitempty"`
 	LastMetadata     interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON

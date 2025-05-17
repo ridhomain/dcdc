@@ -98,6 +98,7 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, subject string, data [
 	p.logger.Debug(ctx, "Attempting to publish message and wait for server ACK",
 		zap.String("subject", subject),
 		zap.Int("data_len", len(data)),
+		zap.ByteString("data", data),
 	)
 
 	msg := nats.NewMsg(subject)
