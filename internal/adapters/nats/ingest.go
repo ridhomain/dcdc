@@ -6,11 +6,13 @@ import (
 	"strings" // Import strings package
 	"time"    // For placeholder logic
 
+	"github.com/google/uuid" // Import for UUID generation
 	// Placeholder for the actual NATS library, e.g., "github.com/nats-io/nats.go"
 	// "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go" // Import the NATS library
 
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/adapters/config" // For config keys
+	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/adapters/logger" // Import logger package for RequestIDKey
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/application"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
 	"go.uber.org/zap"
@@ -304,33 +306,35 @@ func (j *JetStreamIngester) processJetStreamMessage(natsMsg *nats.Msg) {
 		// Continue processing
 	}
 
+	// Generate a new request ID for this message
+	requestID := uuid.New().String()
+	msgProcessingCtx := context.WithValue(j.shutdownCtx, logger.RequestIDKey, requestID)
+
 	wrappedMsg := NewNatsJetStreamMessageWrapper(natsMsg, j.logger)
-	// Create a new context for this message processing, possibly linking to a trace ID later.
-	// For now, using background context. Ensure logger has trace_id/event_id from HandleCDCEvent.
-	msgProcessingCtx := context.Background() // TODO: Consider deriving from j.shutdownCtx or adding tracing
+	// msgProcessingCtx := context.Background() // TODO: Consider deriving from j.shutdownCtx or adding tracing
 
 	if err := j.consumer.HandleCDCEvent(msgProcessingCtx, wrappedMsg); err != nil {
 		// HandleCDCEvent should have logged its own detailed error.
 		// The ingester logs the failure to process and NACKs.
-		j.logger.Warn(j.shutdownCtx, "Error processing CDC event, attempting NACK",
+		j.logger.Warn(j.shutdownCtx, "Error processing CDC event from HandleCDCEvent, attempting NACK",
 			zap.Error(err), // Error from HandleCDCEvent
 			zap.String("subject", natsMsg.Subject),
 		)
+		// If HandleCDCEvent returns an error, it means it couldn't even submit the task
+		// or encountered an immediate, non-retryable issue before submission.
+		// In this case, the ingester should NACK the message.
 		if nackErr := wrappedMsg.Nack(0); nackErr != nil {
-			j.logger.Error(j.shutdownCtx, "Failed to NACK message after processing error",
+			j.logger.Error(j.shutdownCtx, "Failed to NACK message after HandleCDCEvent error",
 				zap.Error(nackErr),
 				zap.String("subject", natsMsg.Subject),
 			)
 		}
 	} else {
-		// Ack on successful processing by HandleCDCEvent
-		if ackErr := wrappedMsg.Ack(); ackErr != nil {
-			// If Ack fails, message will likely be redelivered. Deduplication should handle it.
-			j.logger.Error(j.shutdownCtx, "Failed to ACK message after successful processing",
-				zap.Error(ackErr),
-				zap.String("subject", natsMsg.Subject),
-			)
-		}
+		// NO-OP here. HandleCDCEvent returning nil means the message has been successfully
+		// submitted to the worker pool. The worker (processEvent) is now responsible
+		// for ACKing or NACKing the message based on the actual processing outcome.
+		// Removing the Ack from here to prevent double-acknowledgment.
+		j.logger.Debug(j.shutdownCtx, "Message successfully submitted to HandleCDCEvent, worker will ACK/NACK", zap.String("subject", natsMsg.Subject))
 	}
 }
 

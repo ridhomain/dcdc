@@ -15,13 +15,13 @@ import (
 )
 
 var (
-	dbName     = "test-company"
-	schemaName = "public"
-	lsnVal     = "0/16B6E58"
-	companyID  = "test-company"
-	agentID    = "agent-123"
-	chatID     = "chat-456"
-	messageID  = "msg-789"
+	dbName           = "test-company"
+	schemaName       = "public"
+	lsnVal     int64 = 1632321
+	companyID        = "test-company"
+	agentID          = "agent-123"
+	chatID           = "chat-456"
+	messageID        = "msg-789"
 
 	baseRecordMessages = map[string]interface{}{
 		"agent_id":     agentID,
@@ -39,7 +39,7 @@ var (
 			TableSchema            string                 `json:"table_schema"`
 			TableName              string                 `json:"table_name"`
 			CommitTimestamp        string                 `json:"commit_timestamp"`
-			CommitLSN              interface{}            `json:"commit_lsn"`
+			CommitLSN              int64                  `json:"commit_lsn"`
 			IdempotencyKey         string                 `json:"idempotency_key"`
 			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 			Sink                   struct {
@@ -82,7 +82,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 			TableSchema            string                 `json:"table_schema"`
 			TableName              string                 `json:"table_name"`
 			CommitTimestamp        string                 `json:"commit_timestamp"`
-			CommitLSN              interface{}            `json:"commit_lsn"`
+			CommitLSN              int64                  `json:"commit_lsn"`
 			IdempotencyKey         string                 `json:"idempotency_key"`
 			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 			Sink                   struct {
@@ -109,7 +109,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 			TableSchema            string                 `json:"table_schema"`
 			TableName              string                 `json:"table_name"`
 			CommitTimestamp        string                 `json:"commit_timestamp"`
-			CommitLSN              interface{}            `json:"commit_lsn"`
+			CommitLSN              int64                  `json:"commit_lsn"`
 			IdempotencyKey         string                 `json:"idempotency_key"`
 			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 			Sink                   struct {
@@ -164,7 +164,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedMessageID, payload.RowData["message_id"])
 			},
 			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID),
-			expectedEventID:       fmt.Sprintf("%s:messages:%s", lsnVal, messageID),
+			expectedEventID:       fmt.Sprintf("%d:messages:%s", lsnVal, messageID),
 			expectedError:         nil,
 		},
 		{
@@ -190,7 +190,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 			},
 			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.chats", companyID, agentID),
-			expectedEventID:       fmt.Sprintf("%s:chats:%s", lsnVal, chatID),
+			expectedEventID:       fmt.Sprintf("%d:chats:%s", lsnVal, chatID),
 			expectedError:         nil,
 		},
 		{
@@ -216,7 +216,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 			},
 			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.agents", companyID, agentID),
-			expectedEventID:       fmt.Sprintf("%s:agents:%s", lsnVal, agentID),
+			expectedEventID:       fmt.Sprintf("%d:agents:%s", lsnVal, agentID),
 			expectedError:         nil,
 		},
 		{
@@ -253,7 +253,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedMessageID, payload.RowData["message_id"])
 			},
 			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID),
-			expectedEventID:       fmt.Sprintf("%s:messages:%s", lsnVal, messageID),
+			expectedEventID:       fmt.Sprintf("%d:messages:%s", lsnVal, messageID),
 			expectedError:         nil,
 		},
 		{

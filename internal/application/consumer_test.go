@@ -45,7 +45,7 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 	agentID := "agent123"
 	chatID := "chat789"
 	messageID := "msgABC"
-	lsn := "12345"
+	lsn := int64(12345)
 	tableName := "messages"
 	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 
@@ -63,7 +63,7 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 			TableSchema            string                 `json:"table_schema"`
 			TableName              string                 `json:"table_name"`
 			CommitTimestamp        string                 `json:"commit_timestamp"`
-			CommitLSN              interface{}            `json:"commit_lsn"`
+			CommitLSN              int64                  `json:"commit_lsn"`
 			IdempotencyKey         string                 `json:"idempotency_key"`
 			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 			Sink                   struct {
@@ -87,7 +87,7 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 	mockMsg.subject = originalSubject
 
 	// Data expected to be returned by the transformer
-	expectedTransformedEventIDStr := fmt.Sprintf("%s:%s:%s", lsn, tableName, messageID)
+	expectedTransformedEventIDStr := fmt.Sprintf("%d:%s:%s", lsn, tableName, messageID)
 	expectedTargetSubject := fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID)
 	expectedEnrichedPayload := &domain.EnrichedEventPayload{
 		EventID: expectedTransformedEventIDStr,
@@ -161,7 +161,7 @@ func TestConsumer_processEvent_DuplicateEvent(t *testing.T) {
 		TableSchema            string                 `json:"table_schema"`
 		TableName              string                 `json:"table_name"`
 		CommitTimestamp        string                 `json:"commit_timestamp"`
-		CommitLSN              interface{}            `json:"commit_lsn"`
+		CommitLSN              int64                  `json:"commit_lsn"`
 		IdempotencyKey         string                 `json:"idempotency_key"`
 		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 		Sink                   struct {
@@ -170,7 +170,7 @@ func TestConsumer_processEvent_DuplicateEvent(t *testing.T) {
 		} `json:"sink"`
 	}{
 		TableName:       tableName,
-		CommitLSN:       "lsn123",
+		CommitLSN:       11111,
 		TableSchema:     "public",
 		CommitTimestamp: "2024-05-24T10:01:00Z",
 		IdempotencyKey:  "idemp-key-dup",
@@ -228,7 +228,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 	agentID := "agent123"
 	chatID := "chat789"
 	messageID := "msgABC"
-	lsn := "12345"
+	lsn := int64(12345)
 	tableName := "messages"
 	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 
@@ -243,7 +243,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 		TableSchema            string                 `json:"table_schema"`
 		TableName              string                 `json:"table_name"`
 		CommitTimestamp        string                 `json:"commit_timestamp"`
-		CommitLSN              interface{}            `json:"commit_lsn"`
+		CommitLSN              int64                  `json:"commit_lsn"`
 		IdempotencyKey         string                 `json:"idempotency_key"`
 		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 		Sink                   struct {
@@ -268,7 +268,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 	// Add expectation for GetData
 	mockMsg.On("GetData").Return(rawDataBytes)
 
-	expectedTransformedEventIDStr := fmt.Sprintf("%s:%s:%s", lsn, tableName, messageID)
+	expectedTransformedEventIDStr := fmt.Sprintf("%d:%s:%s", lsn, tableName, messageID)
 	expectedTargetSubject := fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID)
 	enrichedPayloadFromTransformer := &domain.EnrichedEventPayload{EventID: expectedTransformedEventIDStr, AgentID: agentID, ChatID: chatID, RowData: rawCDCDataRecord}
 	expectedPayloadBytes, _ := testJson.Marshal(enrichedPayloadFromTransformer)
@@ -335,7 +335,7 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 		TableSchema            string                 `json:"table_schema"`
 		TableName              string                 `json:"table_name"`
 		CommitTimestamp        string                 `json:"commit_timestamp"`
-		CommitLSN              interface{}            `json:"commit_lsn"`
+		CommitLSN              int64                  `json:"commit_lsn"`
 		IdempotencyKey         string                 `json:"idempotency_key"`
 		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
 		Sink                   struct {
@@ -344,7 +344,7 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 		} `json:"sink"`
 	}{
 		TableName:       tableName,
-		CommitLSN:       "lsn123",
+		CommitLSN:       lsnVal,
 		TableSchema:     "public",
 		CommitTimestamp: "2024-05-24T10:03:00Z",
 		IdempotencyKey:  "idemp-key-transform-err",

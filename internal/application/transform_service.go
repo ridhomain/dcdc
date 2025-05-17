@@ -150,12 +150,12 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	}
 
 	// Construct robust EventID (LSN:Table:PK)
-	commitLSNStr := fmt.Sprintf("%v", cdcEventData.Metadata.CommitLSN)
+	commitLSNStr := fmt.Sprintf("%d", cdcEventData.Metadata.CommitLSN)
 	eventIDStr := fmt.Sprintf("%s:%s:%s", commitLSNStr, authoritativeTableName, pkValueStr) // Use authoritativeTableName
 	// Note: eventID is part of EnrichedEventPayload, context update for logging happens in consumer or by logger itself.
 
 	// Extract agent_id, chat_id, and authoritativeCompanyID from payload.
-	var agentID, chatID, authoritativeCompanyID string
+	var agentID, chatID, messageID, authoritativeCompanyID string
 	switch data := cdcEventData.TypedData.(type) {
 	case *domain.AgentData:
 		agentID = data.AgentID
@@ -167,6 +167,7 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	case *domain.MessageData:
 		agentID = data.AgentID
 		chatID = data.ChatID
+		messageID = data.MessageID
 		authoritativeCompanyID = data.CompanyID
 	default:
 		ts.logger.Error(ctx, "Unhandled typed data structure for ID extraction")
@@ -185,10 +186,12 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 
 	// Create EnrichedEventPayload
 	enrichedPayload := &domain.EnrichedEventPayload{
-		EventID: eventIDStr,
-		AgentID: agentID,
-		ChatID:  chatID,
-		RowData: cdcEventData.Record, // Original full record
+		EventID:   eventIDStr,
+		CompanyID: authoritativeCompanyID,
+		AgentID:   agentID,
+		ChatID:    chatID,
+		MessageID: messageID,           // PK for messages
+		RowData:   cdcEventData.Record, // Original full record
 	}
 
 	// Determine Target Publish Subject

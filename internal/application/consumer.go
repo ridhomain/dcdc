@@ -273,13 +273,9 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 		// or handles cancellation gracefully.
 		// For now, we pass the context through. If tracing is added, new spans might start here.
 
-		// Carry over table_name from the initial context.
-		if tableNameVal := ctx.Value(logger.LogKeyTable); tableNameVal != nil {
-			workerCtx := context.WithValue(context.Background(), logger.LogKeyTable, tableNameVal)
-			c.processEvent(workerCtx, msg, originalSubject)
-		} else {
-			c.processEvent(context.Background(), msg, originalSubject)
-		}
+		// Pass the original context (which includes requestID and other relevant values)
+		// directly to processEvent. processEvent itself will manage its specific context values like table_name and final event_id.
+		c.processEvent(ctx, msg, originalSubject)
 	})
 
 	if submitErr != nil {

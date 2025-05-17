@@ -18,6 +18,9 @@ const (
 	eventIDKey contextKey = "eventID"
 	// LogKeyTable is the context key for table_name used in structured logging.
 	LogKeyTable contextKey = "tableName"
+	// RequestIDKey is the context key for request_id used in structured logging.
+	// This key is exported so other packages (like nats ingester) can use it to set the request ID in the context.
+	RequestIDKey contextKey = "requestID"
 )
 
 // ZapAdapter implements the domain.Logger interface using Zap.
@@ -95,13 +98,16 @@ func (z *ZapAdapter) getLoggerWithContextFields(ctx context.Context) *zap.Logger
 		return z.baseLogger
 	}
 
-	fields := make([]zap.Field, 0, 2) // Pre-allocate for event_id and table_name
+	fields := make([]zap.Field, 0, 3) // Pre-allocate for event_id, table_name, and request_id
 
 	if eventID, ok := ctx.Value(eventIDKey).(domain.EventID); ok && eventID != "" {
 		fields = append(fields, zap.String("event_id", string(eventID)))
 	}
 	if tableName, ok := ctx.Value(LogKeyTable).(string); ok && tableName != "" {
 		fields = append(fields, zap.String(string(LogKeyTable), tableName))
+	}
+	if requestID, ok := ctx.Value(RequestIDKey).(string); ok && requestID != "" {
+		fields = append(fields, zap.String(string(RequestIDKey), requestID))
 	}
 	// Potentially add other context-derived fields here in the future
 

@@ -27,7 +27,7 @@ type CDCEventData struct {
 		TableSchema            string                 `json:"table_schema"`                      // The Postgres schema containing the table
 		TableName              string                 `json:"table_name"`                        // Name of the table that changed
 		CommitTimestamp        string                 `json:"commit_timestamp"`                  // ISO 8601 timestamp when the change was committed
-		CommitLSN              interface{}            `json:"commit_lsn"`                        // Logical replication LSN (Sequin doc says integer, using interface{} for flexibility before converting to string)
+		CommitLSN              int64                  `json:"commit_lsn"`                        // Logical replication LSN (Sequin doc says integer)
 		IdempotencyKey         string                 `json:"idempotency_key"`                   // Opaque string unique to this record/transaction
 		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"` // User-provided transaction context
 		Sink                   struct {
@@ -59,6 +59,7 @@ func getJSONFieldName(field reflect.StructField) string {
 // Fields are based on the provided Agent struct, focusing on those relevant to the consumer.
 // We will unmarshal cdcEventData.Record into this.
 type AgentData struct {
+	ID           int64       `json:"id"`
 	AgentID      string      `json:"agent_id"`
 	CompanyID    string      `json:"company_id,omitempty"`
 	QRCode       string      `json:"qr_code,omitempty"`
@@ -85,6 +86,7 @@ func (ad *AgentData) GetKnownJSONFields() map[string]struct{} {
 
 // ChatData represents the fields extracted from a 'chats' table CDC event record.
 type ChatData struct {
+	ID                    int64       `json:"id"`
 	ChatID                string      `json:"chat_id"`
 	AgentID               string      `json:"agent_id,omitempty"`
 	CompanyID             string      `json:"company_id,omitempty"`
@@ -118,6 +120,7 @@ func (cd *ChatData) GetKnownJSONFields() map[string]struct{} {
 
 // MessageData represents the fields extracted from a 'messages' table CDC event record.
 type MessageData struct {
+	ID               int64       `json:"id"`
 	MessageID        string      `json:"message_id"`
 	ChatID           string      `json:"chat_id,omitempty"`
 	AgentID          string      `json:"agent_id,omitempty"`
@@ -153,9 +156,11 @@ func (md *MessageData) GetKnownJSONFields() map[string]struct{} {
 // to downstream consumers (e.g., daisi-ws-service). It includes routing
 // metadata and the core data from the original table row.
 type EnrichedEventPayload struct {
-	EventID string `json:"event_id"`          // Derived unique event ID (e.g., LSN:Table:PKs)
-	AgentID string `json:"agent_id"`          // Agent ID associated with the event
-	ChatID  string `json:"chat_id,omitempty"` // Chat ID, relevant primarily for message events
+	EventID   string `json:"event_id"`             // Derived unique event ID (e.g., LSN:Table:PKs)
+	CompanyID string `json:"company_id"`           // Company ID associated with the event
+	AgentID   string `json:"agent_id,omitempty"`   // Agent ID associated with the event
+	MessageID string `json:"message_id,omitempty"` // Message ID associated with the event
+	ChatID    string `json:"chat_id,omitempty"`    // Chat ID, relevant primarily for message events
 
 	// RowData contains the actual data from the table's row involved in the CDC event.
 	// This is typically the `Data` field from CDCEventData, potentially after normalization.

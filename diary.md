@@ -200,3 +200,13 @@
     *   Marked Subtask 6.6 as "done".
     *   Marked Main Task 8 as "done".
 *   Subtask 6.7 (Integration Testing for Deduplication Logic) remains "pending" as it requires test implementation by the user.
+
+## 2025-05-27
+
+- Implemented request ID injection in NATS message processing:
+    - Added `github.com/google/uuid` for generating request IDs.
+    - Modified `internal/adapters/nats/ingest.go` in `processJetStreamMessage` to generate a UUID and inject it into the `msgProcessingCtx` using a new context key `logger.RequestIDKey`.
+    - Modified `internal/adapters/logger/zap.go` to define `RequestIDKey` and update `getLoggerWithContextFields` to extract and log the `request_id` if present in the context.
+    - Ensured consistent usage of `RequestIDKey` by having the `nats` package import and use the key defined in the `logger` package.
+- Corrected context propagation to worker pool in `internal/application/consumer.go` (`HandleCDCEvent`): Ensured the context containing `requestID` is passed to `processEvent` so that logs within the worker goroutine also include the `requestID`.
+- Resolved "message was already acknowledged" error: Removed the duplicate ACK call from `internal/adapters/nats/ingest.go` (`processJetStreamMessage`). The responsibility for ACKing/NACKing now solely resides within `internal/application/consumer.go` (`processEvent`) after asynchronous processing is complete.

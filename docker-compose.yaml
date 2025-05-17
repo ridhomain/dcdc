@@ -29,6 +29,9 @@ services:
       - "8222:8222" # Monitoring port
     volumes:
       - ./.data/nats:/data
+    networks:
+      - default
+      - sequin_default
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz" ]
       interval: 5s
@@ -46,3 +49,5 @@ services:
 networks:
   default:
     driver: bridge 
+  sequin_default:
+    external: true 
