@@ -22,24 +22,26 @@ services:
     #   - .env # uncomment if you have an .env file with DAISI_CDC_ prefixed vars
 
   nats:
-    image: nats:2.10-alpine # Using a specific alpine version for size and stability
-    container_name: nats-server
+    image: nats:2.11-alpine
+    command: "--name local-nats-server --http_port 8222 --jetstream --store_dir /data"
     ports:
       - "4222:4222" # Client port
-      - "6222:6222" # Routing port
       - "8222:8222" # Monitoring port
-    command: "-js -DV"  # Enable JetStream and Verbose+Debug logging
+    volumes:
+      - ./.data/nats:/data
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis:
     image: redis:7-alpine # Using a specific alpine version
     container_name: redis-server
     ports:
-      - "6379:6379"
+      - "63791:6379"
     volumes:
-      - redis_data:/data
-
-volumes:
-  redis_data: # Persists Redis data across docker-compose down/up cycles
+      - ./.data/redis:/data
 
 networks:
   default:

@@ -36,11 +36,10 @@ func NewDedupStore(
 		return nil, fmt.Errorf("redis address not configured (key: %s)", config.KeyRedisAddr)
 	}
 
-	// Additional options like password, DB can be added from config if needed.
-	opts := &redis.Options{
-		Addr: redisAddr,
-		// Password: cfg.GetString(config.KeyRedisPassword), // Example
-		// DB:       cfg.GetInt(config.KeyRedisDB),           // Example
+	opts, err := redis.ParseURL(redisAddr)
+	if err != nil {
+		logger.Error(context.Background(), "Failed to parse Redis URL", zap.Error(err), zap.String("redis_url", redisAddr))
+		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
 	}
 
 	client := redis.NewClient(opts)
