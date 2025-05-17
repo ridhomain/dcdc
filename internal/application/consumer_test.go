@@ -37,12 +37,15 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 
 	// Test data for raw message
 	companyID := "testCompany"
+	dbName := companyID
+	schemaName := "public"
+	action := "insert"
 	agentID := "agent123"
 	chatID := "chat789"
 	messageID := "msgABC"
 	lsn := "12345"
 	tableName := "messages"
-	originalSubject := fmt.Sprintf("cdc.daisi_%s.%s", companyID, tableName)
+	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 
 	// Raw data that consumer will parse initially
 	rawCDCDataRecord := map[string]interface{}{
@@ -55,11 +58,26 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 	cdcEventForInput := domain.CDCEventData{
 		Record: rawCDCDataRecord,
 		Metadata: struct {
-			TableName string      `json:"table_name"`
-			CommitLSN interface{} `json:"commit_lsn"`
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              interface{}            `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
 		}{
-			TableName: tableName,
-			CommitLSN: lsn,
+			TableName:       tableName,
+			CommitLSN:       lsn,
+			TableSchema:     "public",
+			CommitTimestamp: "2024-05-24T10:00:00Z",
+			IdempotencyKey:  "idemp-key-msg-consumer",
+			Sink: struct {
+				ID   string "json:\"id\""
+				Name string "json:\"name\""
+			}{"sink-id-consumer", "consumer-test-sink"},
 		},
 	}
 	rawDataBytes, _ := testJson.Marshal(cdcEventForInput)
@@ -130,13 +148,34 @@ func TestConsumer_processEvent_DuplicateEvent(t *testing.T) {
 	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	tableName := "messages"
-	originalSubject := "cdc.testCompany.messages"
+	dbName := "testCompany"
+	schemaName := "public"
+	action := "insert"
+	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 	expectedTransformedEventIDStr := "lsn123:messages:pk123"
 	rawCDCDataRecord := map[string]interface{}{"id": "pk123", "agent_id": "agent1", "chat_id": "chat1", "company_id": "testCompany"}
 	cdcEventForInput := domain.CDCEventData{Record: rawCDCDataRecord, Metadata: struct {
-		TableName string      `json:"table_name"`
-		CommitLSN interface{} `json:"commit_lsn"`
-	}{TableName: tableName, CommitLSN: "lsn123"}}
+		TableSchema            string                 `json:"table_schema"`
+		TableName              string                 `json:"table_name"`
+		CommitTimestamp        string                 `json:"commit_timestamp"`
+		CommitLSN              interface{}            `json:"commit_lsn"`
+		IdempotencyKey         string                 `json:"idempotency_key"`
+		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+		Sink                   struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sink"`
+	}{
+		TableName:       tableName,
+		CommitLSN:       "lsn123",
+		TableSchema:     "public",
+		CommitTimestamp: "2024-05-24T10:01:00Z",
+		IdempotencyKey:  "idemp-key-dup",
+		Sink: struct {
+			ID   string "json:\"id\""
+			Name string "json:\"name\""
+		}{"sink-id-consumer", "consumer-test-sink"},
+	}}
 	rawDataBytes, _ := testJson.Marshal(cdcEventForInput)
 	mockMsg.data = rawDataBytes
 	mockMsg.subject = originalSubject
@@ -177,12 +216,15 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	companyID := "testCompany"
+	dbName := companyID
+	schemaName := "public"
+	action := "insert"
 	agentID := "agent123"
 	chatID := "chat789"
 	messageID := "msgABC"
 	lsn := "12345"
 	tableName := "messages"
-	originalSubject := fmt.Sprintf("cdc.daisi_%s.%s", companyID, tableName)
+	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 
 	rawCDCDataRecord := map[string]interface{}{
 		"id":         messageID,
@@ -192,9 +234,27 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 		"text":       "Hello",
 	}
 	cdcEventForInput := domain.CDCEventData{Record: rawCDCDataRecord, Metadata: struct {
-		TableName string      `json:"table_name"`
-		CommitLSN interface{} `json:"commit_lsn"`
-	}{TableName: tableName, CommitLSN: lsn}}
+		TableSchema            string                 `json:"table_schema"`
+		TableName              string                 `json:"table_name"`
+		CommitTimestamp        string                 `json:"commit_timestamp"`
+		CommitLSN              interface{}            `json:"commit_lsn"`
+		IdempotencyKey         string                 `json:"idempotency_key"`
+		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+		Sink                   struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sink"`
+	}{
+		TableName:       tableName,
+		CommitLSN:       lsn,
+		TableSchema:     "public",
+		CommitTimestamp: "2024-05-24T10:02:00Z",
+		IdempotencyKey:  "idemp-key-pub-err",
+		Sink: struct {
+			ID   string "json:\"id\""
+			Name string "json:\"name\""
+		}{"sink-id-consumer", "consumer-test-sink"},
+	}}
 	rawDataBytes, _ := testJson.Marshal(cdcEventForInput)
 	mockMsg.data = rawDataBytes
 	mockMsg.subject = originalSubject
@@ -248,12 +308,33 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	tableName := "messages"
-	originalSubject := "cdc.testCompany.messages"
+	dbName := "testCompany"
+	schemaName := "public"
+	action := "insert"
+	originalSubject := fmt.Sprintf("sequin.changes.%s.%s.%s.%s", dbName, schemaName, tableName, action)
 	rawCDCDataRecord := map[string]interface{}{"id": "pk123", "agent_id": "agent1"} // Missing company_id and chat_id for messages
 	cdcEventForInput := domain.CDCEventData{Record: rawCDCDataRecord, Metadata: struct {
-		TableName string      `json:"table_name"`
-		CommitLSN interface{} `json:"commit_lsn"`
-	}{TableName: tableName, CommitLSN: "lsn123"}}
+		TableSchema            string                 `json:"table_schema"`
+		TableName              string                 `json:"table_name"`
+		CommitTimestamp        string                 `json:"commit_timestamp"`
+		CommitLSN              interface{}            `json:"commit_lsn"`
+		IdempotencyKey         string                 `json:"idempotency_key"`
+		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+		Sink                   struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sink"`
+	}{
+		TableName:       tableName,
+		CommitLSN:       "lsn123",
+		TableSchema:     "public",
+		CommitTimestamp: "2024-05-24T10:03:00Z",
+		IdempotencyKey:  "idemp-key-transform-err",
+		Sink: struct {
+			ID   string "json:\"id\""
+			Name string "json:\"name\""
+		}{"sink-id-consumer", "consumer-test-sink"},
+	}}
 	rawDataBytes, _ := testJson.Marshal(cdcEventForInput)
 	mockMsg.data = rawDataBytes
 	mockMsg.subject = originalSubject

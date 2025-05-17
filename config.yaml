@@ -12,6 +12,6 @@ workers_multiplier: 4
 min_workers: 2
 log_level: "info"
 metrics_port: "8080"
-js_cdc_stream_subjects: "cdc.*.*"
+js_cdc_stream_subjects: "sequin.changes.*.*.*.*"
 js_wa_stream_subjects: "wa.>"
 panic_guard_failure_threshold_duration: "15m" # 15 minutes 

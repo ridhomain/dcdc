@@ -88,10 +88,24 @@ func (ts *transformService) extractPKValue(typedData interface{}, tableName stri
 }
 
 // TransformAndEnrich implements the EventTransformer interface.
-func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData *domain.CDCEventData, originalSubject string, tableName string) (*domain.EnrichedEventPayload, string, []byte, error) {
+func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData *domain.CDCEventData, originalSubject string, tableNameFromSubject string) (*domain.EnrichedEventPayload, string, []byte, error) {
+	// Use the table name from Sequin's metadata as the authoritative source.
+	authoritativeTableName := cdcEventData.Metadata.TableName
+	if authoritativeTableName == "" {
+		ts.logger.Error(ctx, "Authoritative table name from Sequin metadata is empty", zap.String("subject_table_name", tableNameFromSubject))
+		return nil, "", nil, domain.NewErrDataProcessing("empty_metadata_table_name", tableNameFromSubject, fmt.Errorf("authoritative table name missing from Sequin metadata"))
+	}
+
+	// Log if subject-derived table name differs from metadata, but proceed with metadata's.
+	if tableNameFromSubject != "" && authoritativeTableName != tableNameFromSubject {
+		ts.logger.Warn(ctx, "Mismatch between NATS subject table and payload metadata table. Using metadata table name.",
+			zap.String("subject_table", tableNameFromSubject),
+			zap.String("payload_table", authoritativeTableName))
+	}
+
 	// Populate typed data and identify unhandled fields
 	var typedDataForTable interface{}
-	switch tableName {
+	switch authoritativeTableName { // Use authoritativeTableName
 	case "agents":
 		typedDataForTable = new(domain.AgentData)
 	case "chats":
@@ -99,36 +113,36 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	case "messages":
 		typedDataForTable = new(domain.MessageData)
 	default:
-		ts.logger.Error(ctx, "Unknown table name for typed data unmarshalling", zap.String("table_name", tableName))
+		ts.logger.Error(ctx, "Unknown table name for typed data unmarshalling", zap.String("authoritative_table_name", authoritativeTableName))
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Sentinel error
 	}
 
-	unhandledFields, typePopulationErr := ts.populateTypedDataAndGetUnhandledFields(cdcEventData.Record, tableName, typedDataForTable)
+	unhandledFields, typePopulationErr := ts.populateTypedDataAndGetUnhandledFields(cdcEventData.Record, authoritativeTableName, typedDataForTable)
 	if typePopulationErr != nil {
-		ts.logger.Error(ctx, "Failed to populate typed data or identify unhandled fields", zap.Error(typePopulationErr), zap.String("table_name", tableName))
-		ts.metricsSink.IncEventsTotal(tableName, "typed_data_population_error")
+		ts.logger.Error(ctx, "Failed to populate typed data or identify unhandled fields", zap.Error(typePopulationErr), zap.String("authoritative_table_name", authoritativeTableName))
+		ts.metricsSink.IncEventsTotal(authoritativeTableName, "typed_data_population_error")
 		return nil, "", nil, typePopulationErr // Already a domain.ErrDataProcessing
 	}
 
 	if len(unhandledFields) > 0 {
-		ts.logger.Warn(ctx, "Unhandled fields detected in CDC record", zap.String("table_name", tableName), zap.Strings("unhandled_fields", unhandledFields))
+		ts.logger.Warn(ctx, "Unhandled fields detected in CDC record", zap.String("authoritative_table_name", authoritativeTableName), zap.Strings("unhandled_fields", unhandledFields))
 		for _, fieldName := range unhandledFields {
-			ts.metricsSink.IncUnhandledFieldsTotal(tableName, fieldName)
+			ts.metricsSink.IncUnhandledFieldsTotal(authoritativeTableName, fieldName)
 		}
 	}
 	cdcEventData.TypedData = typedDataForTable
 
 	// Extract Primary Key (PK)
-	pkValueStr, err := ts.extractPKValue(cdcEventData.TypedData, tableName)
+	pkValueStr, err := ts.extractPKValue(cdcEventData.TypedData, authoritativeTableName) // Use authoritativeTableName
 	if err != nil {
 		ts.logger.Error(ctx, "Failed to extract PK for EventID generation", zap.Error(err))
-		ts.metricsSink.IncEventsTotal(tableName, "pk_extraction_error")
+		ts.metricsSink.IncEventsTotal(authoritativeTableName, "pk_extraction_error")
 		return nil, "", nil, err // Already a domain.ErrDataProcessing
 	}
 
 	// Construct robust EventID (LSN:Table:PK)
 	commitLSNStr := fmt.Sprintf("%v", cdcEventData.Metadata.CommitLSN)
-	eventIDStr := fmt.Sprintf("%s:%s:%s", commitLSNStr, tableName, pkValueStr)
+	eventIDStr := fmt.Sprintf("%s:%s:%s", commitLSNStr, authoritativeTableName, pkValueStr) // Use authoritativeTableName
 	// Note: eventID is part of EnrichedEventPayload, context update for logging happens in consumer or by logger itself.
 
 	// Extract agent_id, chat_id, and authoritativeCompanyID from payload.
@@ -148,15 +162,15 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	default:
 		ts.logger.Error(ctx, "Unhandled typed data structure for ID extraction")
 		// This path should be rare given the switch on tableName for typedDataForTable instantiation
-		return nil, "", nil, domain.NewErrDataProcessing("id_extraction_unknown_type", tableName, fmt.Errorf("unhandled typed data for ID extraction: %T", data))
+		return nil, "", nil, domain.NewErrDataProcessing("id_extraction_unknown_type", authoritativeTableName, fmt.Errorf("unhandled typed data for ID extraction: %T", data))
 	}
 
 	if authoritativeCompanyID == "" {
-		ts.logger.Error(ctx, domain.ErrMissingCompanyID.Error(), zap.String("table_name", tableName))
+		ts.logger.Error(ctx, domain.ErrMissingCompanyID.Error(), zap.String("authoritative_table_name", authoritativeTableName))
 		return nil, "", nil, domain.ErrMissingCompanyID
 	}
 	if agentID == "" {
-		ts.logger.Error(ctx, domain.ErrAgentIDEmpty.Error(), zap.String("table_name", tableName))
+		ts.logger.Error(ctx, domain.ErrAgentIDEmpty.Error(), zap.String("authoritative_table_name", authoritativeTableName))
 		return nil, "", nil, domain.ErrAgentIDEmpty
 	}
 
@@ -170,10 +184,10 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 
 	// Determine Target Publish Subject
 	var targetSubject string
-	switch tableName {
+	switch authoritativeTableName { // Use authoritativeTableName
 	case "messages":
 		if chatID == "" {
-			ts.logger.Error(ctx, domain.ErrChatIDMissingForMessages.Error(), zap.String("table", tableName))
+			ts.logger.Error(ctx, domain.ErrChatIDMissingForMessages.Error(), zap.String("table", authoritativeTableName))
 			return nil, "", nil, domain.ErrChatIDMissingForMessages
 		}
 		targetSubject = fmt.Sprintf("wa.%s.%s.messages.%s", authoritativeCompanyID, agentID, chatID)
@@ -189,8 +203,8 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	payloadBytes, err := tsJson.Marshal(enrichedPayload)
 	if err != nil {
 		ts.logger.Error(ctx, "Failed to marshal enriched event payload", zap.Error(err))
-		ts.metricsSink.IncEventsTotal(tableName, "marshal_error")
-		return nil, "", nil, domain.NewErrDataProcessing("marshal_enriched_payload", tableName, err)
+		ts.metricsSink.IncEventsTotal(authoritativeTableName, "marshal_error")
+		return nil, "", nil, domain.NewErrDataProcessing("marshal_enriched_payload", authoritativeTableName, err)
 	}
 
 	return enrichedPayload, targetSubject, payloadBytes, nil

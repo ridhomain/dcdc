@@ -24,11 +24,16 @@ type CDCEventData struct {
 	Changes  map[string]interface{} `json:"changes,omitempty"` // Previous values for changed fields, maps to Sequin's 'changes'
 	Action   string                 `json:"action"`            // "insert", "update", "delete", "read", maps to Sequin's 'action'
 	Metadata struct {
-		// TableSchema string `json:"table_schema"` // Can be added if needed
-		TableName string `json:"table_name"` // Name of the table that changed
-		// CommitTimestamp string `json:"commit_timestamp"` // Can be added if needed
-		CommitLSN interface{} `json:"commit_lsn"` // Logical replication LSN (Sequin doc says integer, using interface{} for flexibility before converting to string)
-		// IdempotencyKey string `json:"idempotency_key"` // Can be added if needed
+		TableSchema            string                 `json:"table_schema"`                      // The Postgres schema containing the table
+		TableName              string                 `json:"table_name"`                        // Name of the table that changed
+		CommitTimestamp        string                 `json:"commit_timestamp"`                  // ISO 8601 timestamp when the change was committed
+		CommitLSN              interface{}            `json:"commit_lsn"`                        // Logical replication LSN (Sequin doc says integer, using interface{} for flexibility before converting to string)
+		IdempotencyKey         string                 `json:"idempotency_key"`                   // Opaque string unique to this record/transaction
+		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"` // User-provided transaction context
+		Sink                   struct {
+			ID   string `json:"id"`   // Unique identifier for the sink
+			Name string `json:"name"` // Name of the sink
+		} `json:"sink"` // Information about the sink receiving this message
 	} `json:"metadata"` // Maps to Sequin's 'metadata' object
 
 	// PK is intended to store the extracted primary key(s) for easier access by the application.
@@ -155,4 +160,16 @@ type EnrichedEventPayload struct {
 	// RowData contains the actual data from the table's row involved in the CDC event.
 	// This is typically the `Data` field from CDCEventData, potentially after normalization.
 	RowData map[string]interface{} `json:"row_data"`
+}
+
+// ParsedSubjectInfo holds information extracted from a NATS subject string.
+// Based on Sequin's NATS sink pattern: sequin.changes.<database_name>.<schema_name>.<table_name>.<action>
+type ParsedSubjectInfo struct {
+	RawSubject   string
+	Prefix       string // e.g., "sequin.changes"
+	DatabaseName string
+	SchemaName   string
+	TableName    string
+	Action       string // e.g., "insert", "update", "delete"
+	IsValid      bool   // Indicates if parsing was successful according to the expected pattern
 }

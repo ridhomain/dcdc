@@ -139,6 +139,7 @@ func NewJetStreamIngester(
 			MaxDeliver:     maxDeliver,
 			DeliverPolicy:  nats.DeliverAllPolicy, // Specify delivery policy for push consumer
 			DeliverSubject: nats.NewInbox(),       // Crucial for making it a push consumer for QueueSubscribe
+			DeliverGroup:   consumerName,          // Add DeliverGroup, matching the queue group name
 		})
 		if consumerAddErr != nil {
 			logger.Error(context.Background(), "Failed to create/update consumer", zap.Error(consumerAddErr), zap.String("consumer_name", consumerName))

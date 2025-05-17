@@ -20,6 +20,8 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 	chatID := "chat-456"
 	messageID := "msg-789"
 	lsnVal := "0/16B6E58"
+	dbName := companyID
+	schemaName := "public"
 
 	baseRecordMessages := map[string]interface{}{
 		"agent_id":   agentID,
@@ -44,11 +46,26 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		Action: "I",
 		Record: baseRecordMessages,
 		Metadata: struct {
-			TableName string      `json:"table_name"`
-			CommitLSN interface{} `json:"commit_lsn"`
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              interface{}            `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
 		}{
-			TableName: "messages",
-			CommitLSN: lsnVal,
+			TableName:       "messages",
+			CommitLSN:       lsnVal,
+			TableSchema:     "public",
+			CommitTimestamp: "2024-05-24T10:00:00Z",
+			IdempotencyKey:  "idemp-key-msg",
+			Sink: struct {
+				ID   string "json:\"id\""
+				Name string "json:\"name\""
+			}{"sink-id-123", "test-sink"},
 		},
 	}
 
@@ -56,11 +73,26 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		Action: "I",
 		Record: baseRecordChats,
 		Metadata: struct {
-			TableName string      `json:"table_name"`
-			CommitLSN interface{} `json:"commit_lsn"`
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              interface{}            `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
 		}{
-			TableName: "chats",
-			CommitLSN: lsnVal,
+			TableName:       "chats",
+			CommitLSN:       lsnVal,
+			TableSchema:     "public",
+			CommitTimestamp: "2024-05-24T10:01:00Z",
+			IdempotencyKey:  "idemp-key-chat",
+			Sink: struct {
+				ID   string "json:\"id\""
+				Name string "json:\"name\""
+			}{"sink-id-123", "test-sink"},
 		},
 	}
 
@@ -68,11 +100,26 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		Action: "I",
 		Record: baseRecordAgents,
 		Metadata: struct {
-			TableName string      `json:"table_name"`
-			CommitLSN interface{} `json:"commit_lsn"`
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              interface{}            `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
 		}{
-			TableName: "agents",
-			CommitLSN: lsnVal,
+			TableName:       "agents",
+			CommitLSN:       lsnVal,
+			TableSchema:     "public",
+			CommitTimestamp: "2024-05-24T10:02:00Z",
+			IdempotencyKey:  "idemp-key-agent",
+			Sink: struct {
+				ID   string "json:\"id\""
+				Name string "json:\"name\""
+			}{"sink-id-123", "test-sink"},
 		},
 	}
 
@@ -88,7 +135,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 	}{
 		{
 			name:       "Happy Path - messages table",
-			subject:    fmt.Sprintf("cdc.%s.messages", companyID),
+			subject:    fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent:   validCDCEventMessages,
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
@@ -105,7 +152,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:       "Happy Path - chats table",
-			subject:    fmt.Sprintf("cdc.%s.chats", companyID),
+			subject:    fmt.Sprintf("sequin.changes.%s.%s.chats.insert", dbName, schemaName),
 			cdcEvent:   validCDCEventChats,
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
@@ -121,7 +168,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:       "Happy Path - agents table",
-			subject:    fmt.Sprintf("cdc.%s.agents", companyID),
+			subject:    fmt.Sprintf("sequin.changes.%s.%s.agents.insert", dbName, schemaName),
 			cdcEvent:   validCDCEventAgents,
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
@@ -137,7 +184,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Happy Path - with unhandled fields",
-			subject: fmt.Sprintf("cdc.%s.messages", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventMessages
 				dataWithNewField := make(map[string]interface{})
@@ -167,7 +214,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Error - Missing PK in messages data (message_id)",
-			subject: fmt.Sprintf("cdc.%s.messages", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventMessages
 				badData := make(map[string]interface{})
@@ -186,7 +233,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Error - Record is nil",
-			subject: fmt.Sprintf("cdc.%s.messages", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventMessages
 				event.Record = nil
@@ -199,7 +246,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Error - Failed to marshal final payload",
-			subject: fmt.Sprintf("cdc.%s.messages", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventMessages
 				dataCopy := make(map[string]interface{})
@@ -217,7 +264,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Error - Missing agent_id from messages data",
-			subject: fmt.Sprintf("cdc.%s.messages", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventMessages
 				badData := make(map[string]interface{})
@@ -236,7 +283,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		},
 		{
 			name:    "Error - Missing company_id from agents data (for subject construction)",
-			subject: fmt.Sprintf("cdc.%s.agents", companyID),
+			subject: fmt.Sprintf("sequin.changes.%s.%s.agents.insert", dbName, schemaName),
 			cdcEvent: func() domain.CDCEventData {
 				event := validCDCEventAgents
 				badData := make(map[string]interface{})

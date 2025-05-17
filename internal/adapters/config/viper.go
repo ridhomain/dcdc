@@ -90,15 +90,21 @@ func NewViperConfigProvider() domain.ConfigProvider {
 	v.SetDefault(KeyJSCdcStreamName, "cdc_events_stream")
 	v.SetDefault(KeyJSWaStreamName, "wa_stream")
 	v.SetDefault(KeyJSCdcConsumerGroup, "cdc_consumers")
-	v.SetDefault(KeyJSAckWait, 30*time.Second)                          // As per PRD.
-	v.SetDefault(KeyJSMaxDeliver, 3)                                    // As per PRD.
-	v.SetDefault(KeyJSMaxAckPending, 5000)                              // As per PRD.
-	v.SetDefault(KeyWorkers, 0)                                         // Default to 0, meaning use multiplier logic
-	v.SetDefault(KeyWorkersMultiplier, 4)                               // Default GOMAXPROCS multiplier
-	v.SetDefault(KeyMinWorkers, 2)                                      // Default minimum workers
-	v.SetDefault(KeyLogLevel, "info")                                   // Default log level.
-	v.SetDefault(KeyMetricsPort, "8080")                                // Default port for /metrics.
-	v.SetDefault(KeyJSCdcStreamSubjects, "cdc.*.*")                     // Default subjects for the CDC stream.
+	v.SetDefault(KeyJSAckWait, 30*time.Second) // As per PRD.
+	v.SetDefault(KeyJSMaxDeliver, 3)           // As per PRD.
+	v.SetDefault(KeyJSMaxAckPending, 5000)     // As per PRD.
+	v.SetDefault(KeyWorkers, 0)                // Default to 0, meaning use multiplier logic
+	v.SetDefault(KeyWorkersMultiplier, 4)      // Default GOMAXPROCS multiplier
+	v.SetDefault(KeyMinWorkers, 2)             // Default minimum workers
+	v.SetDefault(KeyLogLevel, "info")          // Default log level.
+	v.SetDefault(KeyMetricsPort, "8080")       // Default port for /metrics.
+	// Default subjects for the CDC stream, aligning with Sequin NATS sink documentation.
+	v.SetDefault(KeyJSCdcStreamSubjects, "sequin.changes.*.*.*.*")
+	// KeyJSCdcStreamSubjects defines the pattern our service subscribes to.
+	// Sequin NATS sink publishes to: sequin.changes.<database_name>.<schema_name>.<table_name>.<action>
+	// So, "sequin.changes.*.*.*.*" allows us to capture all such messages.
+	// The actual stream name (e.g., cdc_events_stream) is a separate NATS concept and remains configurable
+	// via KeyJSCdcStreamName. The subjects defined here are bound to that stream by NATS JetStream configuration.
 	v.SetDefault(KeyJSWaStreamSubjects, "wa.>")                         // Default subjects for the WA stream.
 	v.SetDefault(KeyPanicGuardFailureThresholdDuration, 15*time.Minute) // Default 15 minutes for panic guard
 
