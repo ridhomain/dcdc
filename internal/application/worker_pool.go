@@ -23,6 +23,10 @@ type WorkerPool struct {
 	wg             sync.WaitGroup // To wait for tasks to complete during shutdown
 }
 
+var getMaxProcs = func() int {
+	return runtime.GOMAXPROCS(0)
+}
+
 // NewWorkerPool creates a new worker pool.
 // It initializes the ants pool based on configuration.
 func NewWorkerPool(cfg domain.ConfigProvider, log domain.Logger) (*WorkerPool, error) {
@@ -43,9 +47,9 @@ func NewWorkerPool(cfg domain.ConfigProvider, log domain.Logger) (*WorkerPool, e
 		} else {
 			logFields = append(logFields, zap.Int("effective_multiplier_config", multiplier))
 		}
-		calculatedWorkers := runtime.GOMAXPROCS(0) * multiplier
+		calculatedWorkers := getMaxProcs() * multiplier
 		numWorkers = calculatedWorkers
-		logFields = append(logFields, zap.String("reason", "calculated_gomaxprocs_x_multiplier"), zap.Int("gomaxprocs", runtime.GOMAXPROCS(0)), zap.Int("calculated_value", numWorkers))
+		logFields = append(logFields, zap.String("reason", "calculated_gomaxprocs_x_multiplier"), zap.Int("gomaxprocs", getMaxProcs()), zap.Int("calculated_value", numWorkers))
 	}
 
 	// 3. Ensure minimum number of workers

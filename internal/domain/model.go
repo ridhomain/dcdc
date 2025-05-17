@@ -85,7 +85,7 @@ func (ad *AgentData) GetKnownJSONFields() map[string]struct{} {
 
 // ChatData represents the fields extracted from a 'chats' table CDC event record.
 type ChatData struct {
-	ChatID                string      `json:"id"` // Note: your Chat struct uses `json:"id"` for ChatID
+	ChatID                string      `json:"chat_id"`
 	AgentID               string      `json:"agent_id,omitempty"`
 	CompanyID             string      `json:"company_id,omitempty"`
 	Jid                   string      `json:"jid,omitempty"`
@@ -118,7 +118,7 @@ func (cd *ChatData) GetKnownJSONFields() map[string]struct{} {
 
 // MessageData represents the fields extracted from a 'messages' table CDC event record.
 type MessageData struct {
-	MessageID        string      `json:"id"` // Note: your Message struct uses `json:"id"` for MessageID
+	MessageID        string      `json:"message_id"`
 	ChatID           string      `json:"chat_id,omitempty"`
 	AgentID          string      `json:"agent_id,omitempty"`
 	CompanyID        string      `json:"company_id,omitempty"`

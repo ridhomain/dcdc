@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 
 	jsoniter "github.com/json-iterator/go"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
@@ -34,6 +36,10 @@ func NewTransformService(logger domain.Logger, metricsSink domain.MetricsSink) E
 // and identifies unhandled fields.
 // This function is moved from consumer.go
 func (ts *transformService) populateTypedDataAndGetUnhandledFields(rawRecord map[string]interface{}, tableName string, typedDataTarget interface{}) (unhandledFields []string, err error) {
+	if rawRecord == nil {
+		return nil, domain.NewErrDataProcessing("populate_typed_data", tableName, errors.New("record is nil"))
+	}
+
 	rawRecordBytes, marshalErr := tsJson.Marshal(rawRecord)
 	if marshalErr != nil {
 		return nil, domain.NewErrDataProcessing("marshal_raw_record_for_typed", tableName, marshalErr)
@@ -55,33 +61,36 @@ func (ts *transformService) populateTypedDataAndGetUnhandledFields(rawRecord map
 		return nil, domain.NewErrDataProcessing("get_known_fields_unknown_type", tableName, fmt.Errorf("unknown typedDataTarget type: %T", td))
 	}
 
+	// Sort field names for consistent test behavior
+	var fieldNames []string
 	for key := range rawRecord {
 		if _, isKnown := knownJsonFields[key]; !isKnown {
-			unhandledFields = append(unhandledFields, key)
+			fieldNames = append(fieldNames, key)
 		}
 	}
-	return unhandledFields, nil
+	sort.Strings(fieldNames)
+	return fieldNames, nil
 }
 
 // extractPKValue now uses the typed data structs.
 // This function is moved from consumer.go
 func (ts *transformService) extractPKValue(typedData interface{}, tableName string) (string, error) {
 	switch data := typedData.(type) {
-	case *domain.AgentData:
-		if data.AgentID == "" {
-			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
-		}
-		return data.AgentID, nil
-	case *domain.ChatData:
-		if data.ChatID == "" {
-			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
-		}
-		return data.ChatID, nil
 	case *domain.MessageData:
 		if data.MessageID == "" {
 			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
 		}
 		return data.MessageID, nil
+	case *domain.ChatData:
+		if data.ChatID == "" {
+			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
+		}
+		return data.ChatID, nil
+	case *domain.AgentData:
+		if data.AgentID == "" {
+			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
+		}
+		return data.AgentID, nil
 	default:
 		return "", domain.NewErrDataProcessing("extract_pk_unknown_type", tableName, fmt.Errorf("cannot extract PK from unknown typed data structure %T", typedData))
 	}

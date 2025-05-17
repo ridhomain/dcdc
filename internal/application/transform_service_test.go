@@ -9,40 +9,30 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
 )
 
-func TestTransformService_TransformAndEnrich(t *testing.T) {
-	json := jsoniter.ConfigFastest
-	companyID := "test-company"
-	agentID := "agent-123"
-	chatID := "chat-456"
-	messageID := "msg-789"
-	lsnVal := "0/16B6E58"
-	dbName := companyID
-	schemaName := "public"
+var (
+	dbName     = "test-company"
+	schemaName = "public"
+	lsnVal     = "0/16B6E58"
+	companyID  = "test-company"
+	agentID    = "agent-123"
+	chatID     = "chat-456"
+	messageID  = "msg-789"
 
-	baseRecordMessages := map[string]interface{}{
-		"agent_id":   agentID,
-		"chat_id":    chatID,
-		"message_id": messageID,
-		"text":       "Hello world",
-		"company_id": companyID,
-	}
-	baseRecordChats := map[string]interface{}{
-		"agent_id":   agentID,
-		"chat_id":    chatID,
-		"chat_name":  "Support Chat",
-		"company_id": companyID,
-	}
-	baseRecordAgents := map[string]interface{}{
-		"agent_id":   agentID,
-		"company_id": companyID,
-		"agent_name": "John Doe",
+	baseRecordMessages = map[string]interface{}{
+		"agent_id":     agentID,
+		"chat_id":      chatID,
+		"message_id":   messageID,
+		"text":         "Hello world",
+		"company_id":   companyID,
+		"message_date": "2025-05-17T00:00:00.000000+07:00",
 	}
 
-	validCDCEventMessages := domain.CDCEventData{
+	validCDCEventMessages = domain.CDCEventData{
 		Action: "I",
 		Record: baseRecordMessages,
 		Metadata: struct {
@@ -59,14 +49,30 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		}{
 			TableName:       "messages",
 			CommitLSN:       lsnVal,
-			TableSchema:     "public",
+			TableSchema:     schemaName,
 			CommitTimestamp: "2024-05-24T10:00:00Z",
 			IdempotencyKey:  "idemp-key-msg",
 			Sink: struct {
-				ID   string "json:\"id\""
-				Name string "json:\"name\""
+				ID   string `json:"id"`
+				Name string `json:"name"`
 			}{"sink-id-123", "test-sink"},
 		},
+	}
+)
+
+func TestTransformService_TransformAndEnrich(t *testing.T) {
+	json := jsoniter.ConfigFastest
+
+	baseRecordChats := map[string]interface{}{
+		"agent_id":   agentID,
+		"chat_id":    chatID,
+		"chat_name":  "Support Chat",
+		"company_id": companyID,
+	}
+	baseRecordAgents := map[string]interface{}{
+		"agent_id":       agentID,
+		"company_id":     companyID,
+		"agent_name_old": "John Doe",
 	}
 
 	validCDCEventChats := domain.CDCEventData{
@@ -86,8 +92,8 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		}{
 			TableName:       "chats",
 			CommitLSN:       lsnVal,
-			TableSchema:     "public",
-			CommitTimestamp: "2024-05-24T10:01:00Z",
+			TableSchema:     schemaName,
+			CommitTimestamp: "2024-05-17T18:35:38.696512Z",
 			IdempotencyKey:  "idemp-key-chat",
 			Sink: struct {
 				ID   string "json:\"id\""
@@ -113,8 +119,8 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		}{
 			TableName:       "agents",
 			CommitLSN:       lsnVal,
-			TableSchema:     "public",
-			CommitTimestamp: "2024-05-24T10:02:00Z",
+			TableSchema:     schemaName,
+			CommitTimestamp: "2024-05-17T18:35:38.696512Z",
 			IdempotencyKey:  "idemp-key-agent",
 			Sink: struct {
 				ID   string "json:\"id\""
@@ -134,12 +140,23 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		expectedError                error
 	}{
 		{
-			name:       "Happy Path - messages table",
-			subject:    fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
-			cdcEvent:   validCDCEventMessages,
-			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
+			name:     "Happy Path - messages table",
+			subject:  fmt.Sprintf("sequin.changes.%s.%s.messages.insert", dbName, schemaName),
+			cdcEvent: validCDCEventMessages,
+			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
+				// Expect warning about unhandled fields
+				mockLogger.On("Warn",
+					mock.Anything, // context
+					"Unhandled fields detected in CDC record",
+					mock.Anything, // fields
+				).Return()
+
+				// Add expectations for metric increments for unhandled fields
+				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "text").Return().Once()
+			},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
 				assert.NotNil(t, payload)
+				assert.NotEmpty(t, payload.EventID)
 				assert.Equal(t, agentID, payload.AgentID)
 				assert.Equal(t, chatID, payload.ChatID)
 				assert.Equal(t, cdcEventDataOriginalRecord, payload.RowData)
@@ -151,10 +168,20 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 			expectedError:         nil,
 		},
 		{
-			name:       "Happy Path - chats table",
-			subject:    fmt.Sprintf("sequin.changes.%s.%s.chats.insert", dbName, schemaName),
-			cdcEvent:   validCDCEventChats,
-			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
+			name:     "Happy Path - chats table",
+			subject:  fmt.Sprintf("sequin.changes.%s.%s.chats.insert", dbName, schemaName),
+			cdcEvent: validCDCEventChats,
+			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
+				// Expect warning about unhandled fields
+				mockLogger.On("Warn",
+					mock.Anything, // context
+					"Unhandled fields detected in CDC record",
+					mock.Anything, // fields
+				).Return()
+
+				// Add expectations for metric increments for unhandled fields
+				mockMetrics.On("IncUnhandledFieldsTotal", "chats", "chat_name").Return().Once()
+			},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
 				assert.NotNil(t, payload)
 				assert.Equal(t, agentID, payload.AgentID)
@@ -167,14 +194,24 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 			expectedError:         nil,
 		},
 		{
-			name:       "Happy Path - agents table",
-			subject:    fmt.Sprintf("sequin.changes.%s.%s.agents.insert", dbName, schemaName),
-			cdcEvent:   validCDCEventAgents,
-			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {},
+			name:     "Happy Path - agents table",
+			subject:  fmt.Sprintf("sequin.changes.%s.%s.agents.insert", dbName, schemaName),
+			cdcEvent: validCDCEventAgents,
+			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
+				// Expect warning about unhandled fields
+				mockLogger.On("Warn",
+					mock.Anything, // context
+					"Unhandled fields detected in CDC record",
+					mock.Anything, // fields
+				).Return()
+
+				// Add expectations for metric increments for unhandled fields
+				mockMetrics.On("IncUnhandledFieldsTotal", "agents", "agent_name_old").Return().Once()
+			},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
 				assert.NotNil(t, payload)
 				assert.Equal(t, agentID, payload.AgentID)
-				assert.Empty(t, payload.ChatID)
+				assert.Equal(t, "", payload.ChatID)
 				assert.Equal(t, cdcEventDataOriginalRecord, payload.RowData)
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 			},
@@ -192,13 +229,20 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 					dataWithNewField[k] = v
 				}
 				dataWithNewField["new_unhandled_field"] = "some_value"
-				dataWithNewField["another_unhandled"] = 123
+				dataWithNewField["another_unhandled"] = float64(123)
 				event.Record = dataWithNewField
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
+				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "text").Return().Once()
 				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "new_unhandled_field").Return().Once()
 				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "another_unhandled").Return().Once()
+				// This case should legitimately warn about unhandled fields.
+				mockLogger.On("Warn",
+					mock.Anything, // context
+					"Unhandled fields detected in CDC record",
+					mock.Anything, // fields - using Anything instead of complex matcher
+				).Return()
 			},
 			expectedEnrichedPayloadCheck: func(t *testing.T, payload *domain.EnrichedEventPayload, cdcEventDataOriginalRecord map[string]interface{}, expectedCompanyID string, expectedMessageID string) {
 				assert.NotNil(t, payload)
@@ -227,9 +271,24 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
-				mockLogger.On("Error", mock.Anything, "Failed to extract PK for table messages", "table", "messages", "record", mock.Anything, "error", mock.Anything).Return()
+				mockLogger.On("Warn",
+					mock.Anything, // context
+					"Unhandled fields detected in CDC record",
+					mock.Anything, // fields - using Anything instead of complex matcher
+				).Return()
+				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "text").Return().Once()
+
+				// Expect Error log during PK extraction failure
+				mockLogger.On("Error",
+					mock.Anything, // context
+					"Failed to extract PK for EventID generation",
+					mock.Anything, // fields
+				).Return()
+
+				// Add expectation for metrics increment
+				mockMetrics.On("IncEventsTotal", "messages", "pk_extraction_error").Return()
 			},
-			expectedError: domain.ErrPKEmpty,
+			expectedError: domain.NewErrDataProcessing("extract_pk", "messages", domain.ErrPKEmpty),
 		},
 		{
 			name:    "Error - Record is nil",
@@ -240,7 +299,8 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
-				mockLogger.On("Error", mock.Anything, "CDC event data record is nil or not a map", "table", "messages", "record", nil).Return()
+				mockLogger.On("Error", mock.Anything, "Failed to populate typed data or identify unhandled fields", mock.Anything).Return()
+				mockMetrics.On("IncEventsTotal", "messages", "typed_data_population_error").Return()
 			},
 			expectedError: domain.NewErrDataProcessing("populate_typed_data", "messages", errors.New("record is nil")),
 		},
@@ -258,9 +318,10 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
-				mockLogger.On("Error", mock.Anything, "Failed to marshal enriched payload", "eventID", mock.Anything, "error", mock.Anything).Return()
+				mockLogger.On("Error", mock.Anything, "Failed to populate typed data or identify unhandled fields", mock.Anything).Return()
+				mockMetrics.On("IncEventsTotal", "messages", "typed_data_population_error").Return()
 			},
-			expectedError: domain.NewErrDataProcessing("marshal_enriched_payload", "messages", errors.New("json: unsupported type: chan int")),
+			expectedError: domain.NewErrDataProcessing("marshal_raw_record_for_typed", "messages", errors.New("json: unsupported type: chan int")),
 		},
 		{
 			name:    "Error - Missing agent_id from messages data",
@@ -277,7 +338,9 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
-				mockLogger.On("Error", mock.Anything, "AgentID is missing in record for table messages", "table", "messages", "record", mock.Anything).Return()
+				mockLogger.On("Warn", mock.Anything, "Unhandled fields detected in CDC record", mock.Anything).Return()
+				mockMetrics.On("IncUnhandledFieldsTotal", "messages", "text").Return()
+				mockLogger.On("Error", mock.Anything, "extracted agent_id is empty", mock.Anything).Return()
 			},
 			expectedError: domain.ErrAgentIDEmpty,
 		},
@@ -296,7 +359,9 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				return event
 			}(),
 			setupMocks: func(mockLogger *mockLogger, mockMetrics *mockMetricsSink) {
-				mockLogger.On("Error", mock.Anything, "CompanyID is missing in record for table agents", "table", "agents", "record", mock.Anything).Return()
+				mockLogger.On("Warn", mock.Anything, "Unhandled fields detected in CDC record", mock.Anything).Return()
+				mockMetrics.On("IncUnhandledFieldsTotal", "agents", "agent_name_old").Return()
+				mockLogger.On("Error", mock.Anything, "authoritative companyID from payload is empty", mock.Anything).Return()
 			},
 			expectedError: domain.ErrMissingCompanyID,
 		},
@@ -306,6 +371,9 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockLoggerInstance := new(mockLogger)
 			mockMetricsInstance := new(mockMetricsSink)
+
+			// Expect the call to log.With in NewTransformService for this specific mock instance
+			mockLoggerInstance.On("With", zap.String("component", "transform_service")).Return(mockLoggerInstance)
 
 			if tt.setupMocks != nil {
 				tt.setupMocks(mockLoggerInstance, mockMetricsInstance)
