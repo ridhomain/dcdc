@@ -85,13 +85,19 @@ func (s *DedupStore) IsDuplicate(ctx context.Context, eventID domain.EventID, tt
 
 	s.logger.Debug(ctx, "Checking for duplicate event in Redis",
 		zap.String("redis_key", redisKey),
-		zap.Duration("ttl", ttl),
+		zap.Duration("ttl_seconds", ttl), // Log TTL in seconds for clarity
+		zap.String("event_id_param", string(eventID)),
 	)
 
 	// Redis SETNX key value EX seconds
 	// Returns true if the key was set (i.e., it's a new event).
 	// Returns false if the key was not set (i.e., key already exists, it's a duplicate).
-	wasSet, err := s.redisClient.SetNX(ctx, redisKey, "", ttl).Result()
+	s.logger.Info(ctx, "Attempting Redis SETNX operation",
+		zap.String("redis_key", redisKey),
+		zap.String("value", "seen"), // The value doesn't really matter for SETNX, but good to log
+		zap.Float64("ttl_seconds_for_setnx", ttl.Seconds()),
+	)
+	wasSet, err := s.redisClient.SetNX(ctx, redisKey, "seen", ttl).Result() // Using "seen" as value
 	if err != nil {
 		// Distinguish between Redis being down vs. other errors if necessary.
 		// For now, any error from SetNX is a failure in the dedup check.
@@ -101,6 +107,11 @@ func (s *DedupStore) IsDuplicate(ctx context.Context, eventID domain.EventID, tt
 		redisSpecificError := fmt.Errorf("redis SETNX for key '%s' failed: %w", redisKey, err)
 		return false, domain.NewErrExternalService("Redis_deduplicator", redisSpecificError)
 	}
+
+	s.logger.Info(ctx, "Redis SETNX result",
+		zap.String("redis_key", redisKey),
+		zap.Bool("was_set_by_this_call (key_was_new)", wasSet),
+	)
 
 	// If wasSet is true, the key was new, so it's NOT a duplicate.
 	// If wasSet is false, the key existed, so it IS a duplicate.

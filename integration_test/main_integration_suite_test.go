@@ -284,7 +284,7 @@ func (s *IntegrationTestSuite) TestAppComponentsInitialization() {
 	s.T().Log("Application components appear initialized.")
 }
 
-// TestAppNATSConnectionHealth checks if the application's NATS ingester/publisher seems healthy.
+// TestAppNATSConnectionHealth checks if the application's NATS connection health (basic check)
 func (s *IntegrationTestSuite) TestAppNATSConnectionHealth() {
 	s.T().Log("Verifying application's NATS connection health (basic check)...")
 	s.Require().NotNil(s.appContainer, "appContainer is nil, cannot proceed")
@@ -591,42 +591,334 @@ func (s *IntegrationTestSuite) TestHappyPath_SingleMessage_MessagesTable() {
 	s.Equal(expectedEventID, enrichedPayload.EventID, "Enriched EventID does not match expected format")
 
 	// 4. Verify Prometheus metrics
-	s.T().Log("Verifying Prometheus metrics after happy path event...")
-	time.Sleep(1 * time.Second) // Give Prometheus a moment to scrape
+	s.T().Logf("Verifying Prometheus metrics after happy path event...")
 
+	// Previous state after TestDuplicateMessageHandling (for table='messages'):
+	// - cdc_consumer_events_total{result="processed"}: 1
+	// - daisi_cdc_consumer_deduplication_checks_total{result="miss"}: 1
+	// - daisi_cdc_consumer_deduplication_checks_total{result="hit"}: 1
+	// This test (TestHappyPath_SingleMessage_MessagesTable) adds for table='messages':
+	// - +1 to cdc_consumer_events_total{result="processed"} (cumulative total: 2)
+	// - +1 to daisi_cdc_consumer_deduplication_checks_total{result="miss"} (cumulative total: 2)
+	// - +0 to daisi_cdc_consumer_deduplication_checks_total{result="hit"} (cumulative total: 1)
+
+	// Fetch all metrics once for this verification block
+	metricsBody := s.fetchMetrics(s.T())
+
+	// 1. Assert cdc_consumer_events_total{table="messages", result="processed"}
+	processedCount, err := getMetricValue(s.T(), metricsBody, "cdc_consumer_events_total", map[string]string{"table": "messages", "result": "processed"})
+	s.Require().NoError(err, "Failed to get metric cdc_consumer_events_total for messages/processed")
+	s.Assert().Equal(2.0, processedCount, "Expected 2 events processed for messages table (cumulative), got %.f", processedCount)
+	s.T().Logf("Metric cdc_consumer_events_total{table=\"messages\", result=\"processed\"}: %f", processedCount)
+
+	// 2. Assert cdc_consumer_events_published_total for the specific subject
+	// enrichedPayload should be the variable holding the unmarshalled domain.EnrichedEventPayload
+	// Construct the expected subject based on its fields, similar to how it's done in transform_service.go
+	if enrichedPayload.CompanyID == "" || enrichedPayload.AgentID == "" || enrichedPayload.ChatID == "" {
+		s.T().Fatalf("enrichedPayload CompanyID, AgentID, or ChatID is empty, cannot assert cdc_consumer_events_published_total metric. CompanyID: '%s', AgentID: '%s', ChatID: '%s'", enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.ChatID)
+	}
+	expectedPublishedSubject := fmt.Sprintf("wa.%s.%s.messages.%s", enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.ChatID)
+
+	publishedCount, err := getMetricValue(s.T(), metricsBody, "cdc_consumer_events_published_total", map[string]string{"subject": expectedPublishedSubject, "status": "success"})
+	s.Require().NoError(err, "Failed to get metric cdc_consumer_events_published_total for subject %s", expectedPublishedSubject)
+	s.Assert().Equal(1.0, publishedCount, "Expected 1 event published successfully to WA stream for subject %s, got %.f", expectedPublishedSubject, publishedCount)
+	s.T().Logf("Metric cdc_consumer_events_published_total{subject=\"%s\", status=\"success\"}: %f", expectedPublishedSubject, publishedCount)
+
+	// 3. Assert daisi_cdc_consumer_deduplication_checks_total{table="messages", result="miss"}
+	dedupMissCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"table": "messages", "result": "miss"})
+	s.Require().NoError(err, "Failed to get metric daisi_cdc_consumer_deduplication_checks_total for messages/miss")
+	s.Assert().Equal(2.0, dedupMissCount, "Expected 2 deduplication checks with result 'miss' for messages table (cumulative), got %.f", dedupMissCount)
+	s.T().Logf("Metric daisi_cdc_consumer_deduplication_checks_total{table=\"messages\", result=\"miss\"}: %f", dedupMissCount)
+
+	// 4. Assert daisi_cdc_consumer_deduplication_checks_total{table="messages", result="hit"}
+	// This should be 1.0 (cumulative from TestDuplicateMessageHandling) as this test case is a new event (a miss).
+	dedupHitCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"table": "messages", "result": "hit"})
+	if err != nil {
+		// If the metric is expected to be 1.0, an error fetching it (e.g., not found) is a test failure.
+		s.Require().NoError(err, "Failed to get metric daisi_cdc_consumer_deduplication_checks_total for messages/hit, expected value 1.0")
+	}
+	s.Assert().Equal(1.0, dedupHitCount, "Metric daisi_cdc_consumer_deduplication_checks_total{table=\"messages\", result=\"hit\"} should be 1.0 (cumulative), got %.f", dedupHitCount)
+	s.T().Logf("Metric daisi_cdc_consumer_deduplication_checks_total{table=\"messages\", result=\"hit\"}: %f", dedupHitCount)
+
+	s.T().Logf("TestHappyPath_SingleMessage_MessagesTable completed successfully.")
+}
+
+// TestDuplicateMessageHandling tests that a duplicate CDC event is correctly deduplicated,
+// not published a second time, and metrics reflect this.
+func (s *IntegrationTestSuite) TestDuplicateMessageHandling() {
+	s.T().Log("Running TestDuplicateMessageHandling...")
+
+	// 1. Prepare a sample CDCEventData for the 'messages' table
+	testCompanyID := "test-company-duplicate-789"
+	testMessagePK := fmt.Sprintf("msg_dup_%s", uuid.NewString()[0:8])
+	now := time.Now().UTC()
+
+	sampleMessageData := domain.MessageData{
+		ID:               now.UnixNano()/1000 + 100, // Ensure unique ID from happy path
+		MessageID:        testMessagePK,
+		ChatID:           "chat_dup_123",
+		AgentID:          "agent_dup_def",
+		CompanyID:        testCompanyID,
+		From:             "sender_dup@example.com",
+		To:               "receiver_dup@example.com",
+		MessageObj:       map[string]interface{}{"text": "This is a duplicate test message."},
+		Status:           "sent",
+		IsDeleted:        false,
+		MessageTimestamp: now.UnixMilli(),
+		MessageDate:      domain.CustomDate{Time: now},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	recordData := make(map[string]interface{})
+	messageDataJSON, err := json.Marshal(sampleMessageData)
+	s.Require().NoError(err, "Failed to marshal sampleMessageData for duplicate test")
+	err = json.Unmarshal(messageDataJSON, &recordData)
+	s.Require().NoError(err, "Failed to unmarshal messageDataJSON to recordData map for duplicate test")
+
+	commitLSN := now.UnixNano() + 1000 // Ensure unique LSN
+
+	sampleCDCEvent := domain.CDCEventData{
+		Record: recordData,
+		Action: "insert",
+		Metadata: struct {
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              int64                  `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
+		}{
+			TableSchema:     "public",
+			TableName:       "messages",
+			CommitTimestamp: now.Format(time.RFC3339Nano),
+			CommitLSN:       commitLSN,
+			IdempotencyKey:  uuid.New().String(),
+		},
+		PK:        map[string]interface{}{"id": sampleMessageData.ID},
+		TypedData: &sampleMessageData,
+	}
+
+	cdcPublishSubject := fmt.Sprintf("sequin.changes.test_db.%s.%s.%s",
+		sampleCDCEvent.Metadata.TableSchema,
+		sampleCDCEvent.Metadata.TableName,
+		sampleCDCEvent.Action,
+	)
+
+	// 2. Publish the event FIRST time
+	s.T().Logf("Publishing first instance of CDC event. LSN: %d, MessageID: %s", sampleCDCEvent.Metadata.CommitLSN, sampleMessageData.MessageID)
+	err = publishCDCEvent(s.T(), s, cdcPublishSubject, sampleCDCEvent)
+	s.Require().NoError(err, "Failed to publish first CDC event")
+
+	// 3. Wait for and validate the first enriched message on wa_stream
+	expectedOriginalMessageID := sampleMessageData.MessageID
+	receivedMsg1, err := s.waitForPublishedWaMessage(10*time.Second, func(msgData []byte) bool {
+		var p domain.EnrichedEventPayload
+		_ = json.Unmarshal(msgData, &p)
+		return p.MessageID == expectedOriginalMessageID && p.CompanyID == testCompanyID
+	})
+	s.Require().NoError(err, "Did not receive the first message on wa_stream")
+	s.Require().NotNil(receivedMsg1, "First received message should not be nil")
+	s.T().Logf("First message received on WA stream. Subject: %s", receivedMsg1.Subject)
+
+	var enrichedPayload1 domain.EnrichedEventPayload
+	err = json.Unmarshal(receivedMsg1.Data, &enrichedPayload1)
+	s.Require().NoError(err, "Failed to unmarshal first enriched payload")
+
+	// 4. Publish the event SECOND time (duplicate)
+	s.T().Logf("Publishing second (duplicate) instance of CDC event. LSN: %d, MessageID: %s", sampleCDCEvent.Metadata.CommitLSN, sampleMessageData.MessageID)
+	// IMPORTANT: Use a *slightly different* idempotency key for the raw CDC publishing if Sequin itself dedups based on that.
+	// However, our internal dedupper uses EventID (LSN:Table:PK), so the same CDCEventData should trigger internal dedup.
+	// For this test, let's assume the same raw event is published.
+	err = publishCDCEvent(s.T(), s, cdcPublishSubject, sampleCDCEvent) // Publish exact same event again
+	s.Require().NoError(err, "Failed to publish second (duplicate) CDC event")
+
+	// 5. Assert that a SECOND enriched message for the same original event does NOT appear
+	s.T().Logf("Verifying no second message for MessageID %s is published to WA stream...", expectedOriginalMessageID)
+	_, err = s.waitForPublishedWaMessage(5*time.Second, func(msgData []byte) bool { // Shorter timeout
+		var p domain.EnrichedEventPayload
+		_ = json.Unmarshal(msgData, &p)
+		// This criteria should ideally not be met by a *new* message if dedup works
+		return p.MessageID == expectedOriginalMessageID && p.EventID != enrichedPayload1.EventID // Looking for a *different* enriched event for the *same* original message
+	})
+	s.Error(err, "Expected a timeout or error waiting for a *second, distinct* enriched message, as it should be deduplicated.")
+	if err != nil {
+		s.Contains(err.Error(), "timed out waiting for message", "Error should indicate timeout for the second message")
+		s.T().Log("Correctly did not receive a second distinct enriched message for the duplicate event.")
+	} else {
+		s.Fail("A second, distinct enriched message was unexpectedly received for a supposedly duplicate event.")
+	}
+
+	// 6. Verify Prometheus metrics
+	s.T().Log("Verifying Prometheus metrics for duplicate handling...")
+	time.Sleep(1 * time.Second) // Give Prometheus a moment
 	metricsBody := s.fetchMetrics(s.T())
 
 	consumerProcessedMetricName := "cdc_consumer_events_total"
-	publisherPublishedMetricName := "cdc_consumer_events_published_total" // Corrected metric name
-	// deduplicationMetricName := "daisi_cdc_consumer_deduplication_checks_total" // Assuming this is defined elsewhere or will be added
+	publisherPublishedMetricName := "cdc_consumer_events_published_total"
+	deduplicationMetricName := "daisi_cdc_consumer_deduplication_checks_total"
 
+	// Metric: cdc_consumer_events_total (processed)
 	processedCount, err := getMetricValue(s.T(), metricsBody, consumerProcessedMetricName, map[string]string{"table": "messages", "result": "processed"})
-	s.Require().NoError(err, "Failed to get metric: %s", consumerProcessedMetricName)
-	s.True(processedCount >= 1, "Expected at least 1 event processed for messages table, got %.f", processedCount)
-	s.T().Logf("Metric %s{table=\"messages\", result=\"processed\"}: %f", consumerProcessedMetricName, processedCount)
+	s.Require().NoError(err, "Failed to get metric: %s {result:processed}", consumerProcessedMetricName)
+	s.Equal(float64(1), processedCount, "Expected 1 event processed for messages table, got %.f", processedCount)
 
-	// Construct the expected subject based on transform_service.go logic
-	// wa.{companyID}.{agentID}.messages.{chatID}
+	// Metric: cdc_consumer_events_total (duplicate)
+	duplicateSkippedCount, err := getMetricValue(s.T(), metricsBody, consumerProcessedMetricName, map[string]string{"table": "messages", "result": "duplicate"})
+	s.Require().NoError(err, "Failed to get metric: %s {result:duplicate}", consumerProcessedMetricName)
+	s.Equal(float64(1), duplicateSkippedCount, "Expected 1 event skipped as duplicate for messages table, got %.f", duplicateSkippedCount)
+
+	// Metric: cdc_consumer_events_published_total (Ensure only one publish for the original successful event)
 	expectedPublishedSubject := fmt.Sprintf("wa.%s.%s.messages.%s",
-		enrichedPayload.CompanyID, // This comes from the enriched message itself
-		enrichedPayload.AgentID,
-		enrichedPayload.ChatID,
+		enrichedPayload1.CompanyID,
+		enrichedPayload1.AgentID,
+		enrichedPayload1.ChatID,
 	)
-
 	publishedCount, err := getMetricValue(s.T(), metricsBody, publisherPublishedMetricName, map[string]string{"subject": expectedPublishedSubject, "status": "success"})
 	s.Require().NoError(err, "Failed to get metric: %s for subject %s", publisherPublishedMetricName, expectedPublishedSubject)
-	s.True(publishedCount >= 1, "Expected at least 1 event published to subject %s, got %.f", expectedPublishedSubject, publishedCount)
-	s.T().Logf("Metric %s{subject=\"%s\", status=\"success\"}: %f", publisherPublishedMetricName, expectedPublishedSubject, publishedCount)
+	s.Equal(float64(1), publishedCount, "Expected only 1 event published to subject %s, got %.f", expectedPublishedSubject, publishedCount)
 
-	// TODO: Add assertion for deduplicationMetricName once implemented and clear on its labels
-	// LSN:Table:PK -> 1747548515414825000:messages:msg_happy_464a207b
-	// Deduplication key: "cdc_event_id:1747548515414825000:messages:msg_happy_464a207b"
-	// dedupKey := "cdc_event_id:" + enrichedPayload.EventID // This should be the key used by DedupStore
-	// dedupCheckCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"result": "miss"}) // or "hit"
-	// s.Require().NoError(err, "Failed to get metric for deduplication checks")
-	// s.True(dedupCheckCount >= 1, "Expected at least 1 deduplication check")
+	// Metric: daisi_cdc_consumer_deduplication_checks_total (miss)
+	dedupMissCount, err := getMetricValue(s.T(), metricsBody, deduplicationMetricName, map[string]string{"table": "messages", "result": "miss"})
+	s.Require().NoError(err, "Failed to get metric: %s {result:miss}", deduplicationMetricName)
+	s.Equal(float64(1), dedupMissCount, "Expected 1 deduplication check with result 'miss', got %.f", dedupMissCount)
 
-	s.T().Log("TestHappyPath_SingleMessage_MessagesTable completed successfully.")
+	// Metric: daisi_cdc_consumer_deduplication_checks_total (hit)
+	dedupHitCount, err := getMetricValue(s.T(), metricsBody, deduplicationMetricName, map[string]string{"table": "messages", "result": "hit"})
+	s.Require().NoError(err, "Failed to get metric: %s {result:hit}", deduplicationMetricName)
+	s.Equal(float64(1), dedupHitCount, "Expected 1 deduplication check with result 'hit', got %.f", dedupHitCount)
+
+	s.T().Log("TestDuplicateMessageHandling completed successfully.")
+}
+
+// TestSkippedTableHandling tests that a CDC event for a table not in the allowed list
+// (e.g., "user_profiles") is correctly filtered out, not published, and metrics reflect this.
+func (s *IntegrationTestSuite) TestSkippedTableHandling() {
+	s.T().Log("Running TestSkippedTableHandling...")
+
+	// 1. Prepare a sample CDCEventData for an unallowed table
+	skippedTableName := "user_profiles" // This table should NOT be in domain.AllowedTables
+	testPK := fmt.Sprintf("profile_%s", uuid.NewString()[0:8])
+	now := time.Now().UTC()
+
+	// Ensure the skipped table is indeed not in the allowed list for the test to be valid.
+	// We check if the key exists in the map. 'ok' will be true if it exists, false otherwise.
+	// We assert that 'ok' is false for this unallowed table.
+	_, ok := domain.AllowedTables[skippedTableName]
+	s.False(ok, "The table '%s' should NOT be in domain.AllowedTables for this test to be valid. 'ok' was: %v", skippedTableName, ok)
+
+	sampleSkippedRecord := map[string]interface{}{
+		"id":         testPK,
+		"user_id":    "user_skipped_123",
+		"company_id": "company_skipped_abc", // Include company_id as it's often used for routing/logging
+		"full_name":  "Skipped User",
+		"email":      "skipped@example.com",
+		"created_at": now.Format(time.RFC3339Nano),
+	}
+
+	commitLSN := now.UnixNano() + 2000 // Ensure unique LSN
+
+	sampleCDCEvent := domain.CDCEventData{
+		Record: sampleSkippedRecord,
+		Action: "insert",
+		Metadata: struct {
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              int64                  `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
+		}{
+			TableSchema:     "public",
+			TableName:       skippedTableName, // Critical: use the unallowed table name
+			CommitTimestamp: now.Format(time.RFC3339Nano),
+			CommitLSN:       commitLSN,
+			IdempotencyKey:  uuid.New().String(),
+		},
+		PK: map[string]interface{}{"id": testPK},
+		// TypedData will be nil as this table isn't handled by specific structs
+	}
+
+	cdcPublishSubject := fmt.Sprintf("sequin.changes.test_db.%s.%s.%s",
+		sampleCDCEvent.Metadata.TableSchema,
+		sampleCDCEvent.Metadata.TableName,
+		sampleCDCEvent.Action,
+	)
+
+	// 2. Publish the event
+	s.T().Logf("Publishing CDC event for skipped table '%s'. LSN: %d, PK: %s", skippedTableName, sampleCDCEvent.Metadata.CommitLSN, testPK)
+	err := publishCDCEvent(s.T(), s, cdcPublishSubject, sampleCDCEvent)
+	s.Require().NoError(err, "Failed to publish CDC event for skipped table")
+
+	// 3. Assert that NO message is published to wa_stream for this event
+	s.T().Logf("Verifying no message for skipped table '%s', PK '%s' is published to WA stream...", skippedTableName, testPK)
+	_, err = s.waitForPublishedWaMessage(5*time.Second, func(msgData []byte) bool { // Shorter timeout
+		// Try to unmarshal, but any message here is unexpected.
+		// A robust check might try to find a unique identifier from the skipped event if it somehow leaked.
+		// For now, any message received in this short window after publishing a skipped event is a failure.
+		s.T().Logf("Unexpectedly received a message on wa_stream while waiting for skipped event. Data: %s", string(msgData))
+		return true // If any message comes through, the criteria is met for failure.
+	})
+	s.Error(err, "Expected a timeout waiting for a message on wa_stream, as the event for table '%s' should have been skipped.", skippedTableName)
+	if err != nil {
+		s.Contains(err.Error(), "timed out waiting for message", "Error should indicate timeout for the skipped message")
+		s.T().Logf("Correctly did not receive any message on wa_stream for the skipped table event.")
+	} else {
+		s.Fail("An unexpected message was received on wa_stream for a supposedly skipped table event.")
+	}
+
+	// 4. Verify Prometheus metrics
+	s.T().Log("Verifying Prometheus metrics for skipped table handling...")
+	time.Sleep(1 * time.Second) // Give Prometheus a moment to scrape
+	metricsBody := s.fetchMetrics(s.T())
+
+	consumerEventsTotalMetric := "cdc_consumer_events_total"
+
+	// Metric: cdc_consumer_events_total{table="user_profiles", result="skipped"} should be 1
+	skippedCount, err := getMetricValue(s.T(), metricsBody, consumerEventsTotalMetric, map[string]string{"table": skippedTableName, "result": "skipped"})
+	s.Require().NoError(err, "Failed to get metric: %s{table=%s, result=skipped}", consumerEventsTotalMetric, skippedTableName)
+	s.Assert().Equal(1.0, skippedCount, "Expected 1 event skipped for table '%s', got %.f", skippedTableName, skippedCount)
+	s.T().Logf("Metric %s{table=\"%s\", result=\"skipped\"}: %f", consumerEventsTotalMetric, skippedTableName, skippedCount)
+
+	// Metric: cdc_consumer_events_total{table="user_profiles", result="processed"} should NOT exist or be 0
+	// Depending on metric initialization, it might not exist if never incremented.
+	processedCount, err := getMetricValue(s.T(), metricsBody, consumerEventsTotalMetric, map[string]string{"table": skippedTableName, "result": "processed"})
+	if err == nil { // Metric exists
+		s.Assert().Equal(0.0, processedCount, "Expected 0 events processed for table '%s', got %.f", skippedTableName, processedCount)
+		s.T().Logf("Metric %s{table=\"%s\", result=\"processed\"}: %f (expected 0)", consumerEventsTotalMetric, skippedTableName, processedCount)
+	} else { // Metric does not exist, which is also OK.
+		s.T().Logf("Metric %s{table=\"%s\", result=\"processed\"} not found, which is acceptable as it should be 0.", consumerEventsTotalMetric, skippedTableName)
+	}
+
+	// Metric: daisi_cdc_consumer_deduplication_checks_total{table="user_profiles"} should not be incremented
+	// as filtering happens before deduplication.
+	dedupMissCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"table": skippedTableName, "result": "miss"})
+	if err == nil {
+		s.Assert().Equal(0.0, dedupMissCount, "Expected 0 dedup miss for table '%s', got %.f", skippedTableName, dedupMissCount)
+	} else {
+		s.T().Logf("Metric daisi_cdc_consumer_deduplication_checks_total{table=\"%s\", result=\"miss\"} not found, which is correct.", skippedTableName)
+	}
+
+	dedupHitCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"table": skippedTableName, "result": "hit"})
+	if err == nil {
+		s.Assert().Equal(0.0, dedupHitCount, "Expected 0 dedup hit for table '%s', got %.f", skippedTableName, dedupHitCount)
+	} else {
+		s.T().Logf("Metric daisi_cdc_consumer_deduplication_checks_total{table=\"%s\", result=\"hit\"} not found, which is correct.", skippedTableName)
+	}
+
+	// Metric: cdc_consumer_events_published_total should not be incremented for any subject related to this event.
+	// This is harder to assert definitively without knowing a potential (but wrong) subject.
+	// The earlier check for no message on wa_stream is the primary validation for this.
+
+	s.T().Log("TestSkippedTableHandling completed successfully.")
 }
 
 // assertRowDataField is a helper to assert values in the RowData map, handling potential type differences.

@@ -295,3 +295,33 @@
 *   All tests in `IntegrationTestSuite` now pass, including `TestHappyPath_SingleMessage_MessagesTable`.
 *   This confirms the end-to-end processing for a single message, including NATS publishing and Prometheus metric recording for both consumed and published events.
 *   Subtask 11.4 marked as 'done'.
+
+## 2025-05-18T14:09:21+07:00 - Integration Test Metrics Fixed
+
+- Successfully debugged and fixed failing integration tests in `integration_test/main_integration_suite_test.go`.
+- The primary issue was related to Prometheus metric assertions in `TestHappyPath_SingleMessage_MessagesTable` not accounting for cumulative metric values from preceding tests (specifically `TestDuplicateMessageHandling`).
+- **Solution Steps**:
+    - Adjusted expected metric values in `TestHappyPath_SingleMessage_MessagesTable` to reflect the sum of its operations plus values from `TestDuplicateMessageHandling`.
+        - `cdc_consumer_events_total{table="messages", result="processed"}` expected value changed to 2.0.
+        - `daisi_cdc_consumer_deduplication_checks_total{table="messages", result="miss"}` expected value changed to 2.0.
+        - `daisi_cdc_consumer_deduplication_checks_total{table="messages", result="hit"}` assertion changed to expect 1.0 (from previous test) instead of being absent.
+    - Corrected the logic for obtaining the NATS subject for the `cdc_consumer_events_published_total` metric. Instead of using a non-existent `enrichedPayload.Subject` field, the subject string is now correctly constructed using `enrichedPayload.CompanyID`, `enrichedPayload.AgentID`, and `enrichedPayload.ChatID`.
+    - Ensured that existing helper functions `getMetricValue` and `s.fetchMetrics` were used correctly to fetch and assert metric values.
+- All integration tests are now passing.
+
+## 2025-05-18T14:10:57+07:00
+Determined the next task using Task Master.
+Next Task: **Task 11: Comprehensive Integration Testing with Testcontainers-Go**
+Next Subtask: **Subtask 11.6: Test Skipped Table Scenario**
+   - Description: Develop a test for messages targeting unallowed tables: filter (skipped), ack, no further processing. Validate metrics.
+   - Details: Send a message for a table not in the allowed list and ensure it is filtered out early.
+   - Test Strategy: Assert that the message is not published or processed further and metrics indicate a skipped table.
+
+## 2025-05-18T14:13:46+07:00 - Subtask 11.6: Test Skipped Table Scenario
+
+- Marked subtask 11.6 as "in-progress".
+- Added the `TestSkippedTableHandling` test case to `integration_test/main_integration_suite_test.go`.
+  - This test verifies that CDC events for tables not in `domain.AllowedTables` (using "user_profiles" as an example) are correctly filtered out.
+  - It asserts that no message is published to the `wa_stream` for such events.
+  - It checks that the `cdc_consumer_events_total` metric with `result="skipped"` for the specific table is incremented, and other processing/deduplication metrics for that table remain unaffected.
+  - Corrected an initial linter error by properly checking for key existence in the `domain.AllowedTables` map (`map[string]struct{}`) using the `_, ok := ...` idiom.

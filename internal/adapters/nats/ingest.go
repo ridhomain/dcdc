@@ -257,23 +257,35 @@ func (w *natsJetStreamMessageWrapper) GetSubject() string {
 	return w.msg.Subject
 }
 
-func (w *natsJetStreamMessageWrapper) Ack() error {
-	if err := w.msg.AckSync(); err != nil { // Using AckSync for clearer error handling if needed
-		// Log error if AckSync fails? Depends on how critical it is / if redelivery is worse.
-		w.logger.Error(context.Background(), "Failed to ACK message via AckSync", zap.Error(err), zap.String("subject", w.msg.Subject))
-		return err
+// Ack acknowledges the message to the NATS server.
+func (m *natsJetStreamMessageWrapper) Ack() error {
+	var streamSeq uint64
+	meta, metaErr := m.msg.Metadata()
+	if metaErr == nil && meta != nil {
+		streamSeq = meta.Sequence.Stream
 	}
-	return nil
+	m.logger.Debug(context.Background(), "natsJetStreamMessageWrapper: Ack() called", zap.String("subject", m.msg.Subject), zap.Uint64("stream_sequence", streamSeq))
+	err := m.msg.AckSync() // Using AckSync for synchronous acknowledgement and error reporting
+	if err != nil {
+		m.logger.Error(context.Background(), "natsJetStreamMessageWrapper: msg.AckSync() failed", zap.Error(err), zap.String("subject", m.msg.Subject))
+	} else {
+		m.logger.Info(context.Background(), "natsJetStreamMessageWrapper: msg.AckSync() successful", zap.String("subject", m.msg.Subject))
+	}
+	return err
 }
 
-func (w *natsJetStreamMessageWrapper) Nack(delay time.Duration) error {
-	// PRD implies NACK relies on JetStream's AckWait rather than client-side delay for redelivery.
-	// So, Nak() is appropriate. If a delay is explicitly needed, NakWithDelay(delay) could be used.
-	if err := w.msg.Nak(); err != nil {
-		w.logger.Error(context.Background(), "Failed to NACK message", zap.Error(err), zap.String("subject", w.msg.Subject))
-		return err
+// Nack negatively acknowledges the message to the NATS server, optionally with a delay.
+func (m *natsJetStreamMessageWrapper) Nack(delay time.Duration) error {
+	m.logger.Debug(context.Background(), "natsJetStreamMessageWrapper: Nack() called", zap.String("subject", m.msg.Subject), zap.Duration("delay", delay))
+	// NATS Go client's NackWithDelay (if available and appropriate) or Nack. AckNak is also an option.
+	// For simplicity, using Nack without explicit delay handling here. JetStream handles redelivery based on consumer config.
+	err := m.msg.Nak() // Nak is simpler; redelivery delay is part of consumer config
+	if err != nil {
+		m.logger.Error(context.Background(), "natsJetStreamMessageWrapper: msg.Nak() failed", zap.Error(err), zap.String("subject", m.msg.Subject))
+	} else {
+		m.logger.Info(context.Background(), "natsJetStreamMessageWrapper: msg.Nak() successful", zap.String("subject", m.msg.Subject))
 	}
-	return nil
+	return err
 }
 
 // processJetStreamMessage is the callback for JetStream subscriptions.

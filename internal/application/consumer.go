@@ -209,6 +209,7 @@ func (c *Consumer) ProcessEvent(ctx context.Context, msg CDCEventMessage, origin
 		zap.Duration("processing_time", processingDuration),
 	)
 
+	c.logger.Info(ctx, "Attempting to ACK message", zap.String("event_id", enrichedPayload.EventID), zap.String("subject", originalSubject))
 	if ackErr := msg.Ack(); ackErr != nil {
 		c.logger.Error(ctx, "Failed to ACK message after successful processing", zap.Error(ackErr), zap.String("event_id", enrichedPayload.EventID))
 		// If ACK fails, the message might be redelivered. This is a tricky state.
@@ -219,6 +220,7 @@ func (c *Consumer) ProcessEvent(ctx context.Context, msg CDCEventMessage, origin
 		// For now, let's assume successful processing up to this point warrants a reset.
 		c.resetConsecutiveFailures(ctx) // Panic Guard: Reset on successful processing before ACK attempt
 	} else {
+		c.logger.Info(ctx, "Successfully ACKed message", zap.String("event_id", enrichedPayload.EventID), zap.String("subject", originalSubject))
 		c.resetConsecutiveFailures(ctx) // Panic Guard: Reset on successful ACK
 	}
 }
@@ -258,6 +260,7 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 	if _, isAllowed := domain.AllowedTables[parsedSubjectInfo.TableName]; !isAllowed {
 		c.logger.Info(ctx, "Table not allowed, skipping event before worker submission", zap.String("table_name", parsedSubjectInfo.TableName))
 		c.metricsSink.IncEventsTotal(parsedSubjectInfo.TableName, "skipped")
+		c.logger.Info(ctx, "Attempting to ACK skipped message for disallowed table", zap.String("subject", originalSubject), zap.String("table_name", parsedSubjectInfo.TableName))
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Error(ctx, "Failed to ACK skipped message for disallowed table", zap.Error(ackErr), zap.String("table_name", parsedSubjectInfo.TableName))
 		}
@@ -287,11 +290,13 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 			// then Ack might be appropriate. Otherwise, Nack.
 			// For now, assume task submission errors are serious and message might be lost if Acked.
 			// Let's Nack to indicate a system-level issue in processing the message submission.
+			c.logger.Warn(ctx, "Attempting to NACK message due to worker submission failure (ErrTaskSubmissionToPool)", zap.String("subject", originalSubject), zap.Error(submitErr))
 			if nackErr := msg.Nack(0); nackErr != nil {
 				c.logger.Error(ctx, "Failed to NACK message after worker submission failure", zap.Error(nackErr))
 			}
 		} else {
 			// For other types of submission errors not wrapped by our custom type.
+			c.logger.Warn(ctx, "Attempting to NACK message due to generic worker submission failure", zap.String("subject", originalSubject), zap.Error(submitErr))
 			if nackErr := msg.Nack(0); nackErr != nil {
 				c.logger.Error(ctx, "Failed to NACK message after generic worker submission failure", zap.Error(nackErr))
 			}
