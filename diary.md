@@ -1,3 +1,8 @@
+## 2025-05-18T17:43:32+07:00
+
+- Analyzed `todo.md` against the current codebase state (`repomix-output.md`).
+- Updated `todo.md` to reflect the status of each item (Done, Pending, Partially Addressed) based on the code analysis. Identified pending unit tests, integration tests for Panic Guard, and documentation reviews as key remaining tasks.
+
 - Completed Subtask 1.1: Initialized Go module (verified existing) and created the initial Clean Architecture directory structure with placeholder Go files for `daisi-cdc-consumer-service`.
 - Completed Subtask 1.2: Defined core domain models (`EventID`, `AllowedTables`, `CDCEventData`, `EnrichedEventPayload`) in `internal/domain/model.go`.
 - Completed Subtask 1.3: Defined port interfaces (`ConfigProvider`, `Logger`, `DedupStore`, `Publisher`, `MetricsSink`) in `internal/domain/ports.go`.
@@ -351,3 +356,27 @@ Next Subtask: **Subtask 11.6: Test Skipped Table Scenario**
         8. The app attempts to publish to `wa_stream`, which is *still configured to be full*, leading to `maxDeliver` publish failures.
         9. Asserts the message does not appear on `wa_stream` and that publish failure metrics increment by `maxDeliver`.
         - Added `createTestMetadata` helper to reduce boilerplate.
+
+## 2025-05-18T17:24:44+07:00
+
+- Created system architecture documentation for `daisi-cdc-consumer-service`.
+- The document covers a high-level overview, component interactions, data flow, design decisions, and system constraints.
+- Placed the document at `docs/system_architecture.md`.
+
+## 2025-05-18T17:26:16+07:00
+
+- Updated the "Simplified Text Flow" section in `docs/system_architecture.md` to use Mermaid sequence diagram syntax instead of a plain text representation.
+
+## 2025-05-18T17:30:43+07:00
+
+- Created a new `docs/developer_guide.md` file.
+- The guide includes sections for Setup Instructions, Project Structure Overview, Development Workflow, Testing Approach, and Common Troubleshooting Steps.
+
+## 2025-05-18T17:37:24+07:00
+
+- Created a new `docs/schemas.md` file.
+- The document includes the JSON schema for `EnrichedEventPayload` and the NATS subject patterns used for publishing events.
+
+## 2025-05-18T17:39:37+07:00
+
+- Compiled and refined content from `docs/developer_guide.md`, `docs/schemas.md`, `docs/system_architecture.md`, and `scripts/new-prd-daisi-cdc-consumer-service.md` into a new comprehensive `README.md` for the project.
