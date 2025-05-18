@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
 	"net/http" // For converting bool to string for label
 	"time"
@@ -11,17 +10,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
-	"go.uber.org/zap"
 )
 
 // prometheusMetricsSink implements the domain.MetricsSink interface using Prometheus.
 type prometheusMetricsSink struct {
 	cdcConsumerEventsTotal          *prometheus.CounterVec
 	cdcConsumerPublishErrorsTotal   prometheus.Counter
+	cdcConsumerEventsPublishedTotal *prometheus.CounterVec
 	cdcConsumerRedisHitTotal        *prometheus.CounterVec
 	cdcConsumerProcessingSeconds    *prometheus.HistogramVec
 	cdcConsumerLagSeconds           prometheus.Gauge
 	cdcConsumerUnhandledFieldsTotal *prometheus.CounterVec
+	cdcConsumerDedupChecksTotal     *prometheus.CounterVec
 	// We might need a configProvider if port/path is configurable here, or handle that in bootstrap
 }
 
@@ -40,6 +40,13 @@ func NewPrometheusMetricsSink() (domain.MetricsSink, error) {
 				Name: "cdc_consumer_publish_errors_total",
 				Help: "Total number of errors encountered while publishing events.",
 			},
+		),
+		cdcConsumerEventsPublishedTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cdc_consumer_events_published_total",
+				Help: "Total number of events published, labeled by subject and status.",
+			},
+			[]string{"subject", "status"}, // status: success, failure
 		),
 		cdcConsumerRedisHitTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
@@ -68,6 +75,13 @@ func NewPrometheusMetricsSink() (domain.MetricsSink, error) {
 				Help: "Total number of unhandled fields detected in CDC records, labeled by table and field name.",
 			},
 			[]string{"table", "field_name"},
+		),
+		cdcConsumerDedupChecksTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "daisi_cdc_consumer_deduplication_checks_total",
+				Help: "Total number of deduplication checks performed, partitioned by table and result (hit/miss).",
+			},
+			[]string{"table", "result"},
 		),
 	}
 	return sink, nil
@@ -107,6 +121,16 @@ func (s *prometheusMetricsSink) IncUnhandledFieldsTotal(table, fieldName string)
 	s.cdcConsumerUnhandledFieldsTotal.WithLabelValues(table, fieldName).Inc()
 }
 
+// IncEventsPublished increments the counter for published events.
+func (s *prometheusMetricsSink) IncEventsPublished(subject string, status string) {
+	s.cdcConsumerEventsPublishedTotal.WithLabelValues(subject, status).Inc()
+}
+
+// IncDedupCheck increments the counter for deduplication checks.
+func (s *prometheusMetricsSink) IncDedupCheck(table string, result string) {
+	s.cdcConsumerDedupChecksTotal.WithLabelValues(table, result).Inc()
+}
+
 // StartMetricsServer starts an HTTP server to expose Prometheus metrics.
 // This is a helper function and might be called from bootstrap or main.
 // It takes a ConfigProvider to get the port.
@@ -138,120 +162,4 @@ func StartMetricsServer(metricsPort string) *http.Server {
 		}
 	}()
 	return srv // Return server instance for graceful shutdown
-}
-
-// PrometheusSink implements the domain.MetricsSink interface using Prometheus.
-// It also manages an HTTP server to expose the /metrics endpoint.
-type PrometheusSink struct {
-	configProvider domain.ConfigProvider
-	logger         domain.Logger
-	httpServer     *http.Server
-
-	// Placeholder for actual Prometheus collectors
-	// eventsTotal         *prometheus.CounterVec
-	// processingSeconds   *prometheus.HistogramVec
-	// publishErrorsTotal  prometheus.Counter
-	// redisHitsTotal      *prometheus.CounterVec
-	// consumerLag         prometheus.Gauge
-}
-
-// NewPrometheusSink creates a new Prometheus metrics sink.
-// It initializes Prometheus collectors and sets up an HTTP server for the /metrics endpoint.
-func NewPrometheusSink(
-	cfg domain.ConfigProvider,
-	log domain.Logger,
-) (*PrometheusSink, error) {
-	logger := log.With(zap.String("component", "prometheus_sink"))
-
-	// Placeholder: Initialize actual Prometheus collectors here and register them.
-	// Example:
-	// ps.eventsTotal = prometheus.NewCounterVec(...)
-	// prometheus.MustRegister(ps.eventsTotal)
-
-	metricsPort := cfg.GetString("metrics_port") // Use constant from config package
-	if metricsPort == "" {
-		metricsPort = "8080" // Default if not set
-		logger.Warn(context.Background(), "Metrics port not configured, defaulting", zap.String("default_port", metricsPort))
-	}
-
-	mux := http.NewServeMux()
-	// Placeholder: Use promhttp.Handler() once collectors are registered.
-	// mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// Simple placeholder handler
-		_, _ = w.Write([]byte("# Placeholder /metrics endpoint. Real Prometheus metrics go here.\n"))
-		_, _ = w.Write([]byte("cdc_consumer_stub_metric 1\n"))
-	})
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status": "ok"}`))
-	})
-
-	server := &http.Server{
-		Addr:    ":" + metricsPort,
-		Handler: mux,
-		// ReadTimeout:  5 * time.Second, // Example timeouts
-		// WriteTimeout: 10 * time.Second,
-		// IdleTimeout:  120 * time.Second,
-	}
-
-	logger.Info(context.Background(), "Prometheus Sink created (stub implementation)", zap.String("metrics_port", metricsPort))
-
-	return &PrometheusSink{
-		configProvider: cfg,
-		logger:         logger,
-		httpServer:     server,
-	}, nil
-}
-
-// StartHttpServer starts the HTTP server to expose the /metrics endpoint.
-// This should be run in a goroutine.
-func (ps *PrometheusSink) StartHttpServer() {
-	ps.logger.Info(context.Background(), "Starting Prometheus metrics HTTP server", zap.String("address", ps.httpServer.Addr))
-	if err := ps.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		ps.logger.Error(context.Background(), "Prometheus metrics HTTP server failed", zap.Error(err))
-	}
-}
-
-// ShutdownHttpServer gracefully shuts down the /metrics HTTP server.
-func (ps *PrometheusSink) ShutdownHttpServer(ctx context.Context) error {
-	ps.logger.Info(ctx, "Shutting down Prometheus metrics HTTP server...")
-	if err := ps.httpServer.Shutdown(ctx); err != nil {
-		ps.logger.Error(ctx, "Prometheus metrics HTTP server shutdown failed", zap.Error(err))
-		return fmt.Errorf("metrics server shutdown failed: %w", err)
-	}
-	ps.logger.Info(ctx, "Prometheus metrics HTTP server shutdown complete.")
-	return nil
-}
-
-// --- Implementation of domain.MetricsSink interface (stubs) ---
-
-func (ps *PrometheusSink) IncEventsTotal(table, result string) {
-	// Placeholder: ps.eventsTotal.WithLabelValues(table, result).Inc()
-	ps.logger.Debug(context.Background(), "Metric: IncEventsTotal (stub)", zap.String("table", table), zap.String("result", result))
-}
-
-func (ps *PrometheusSink) ObserveProcessingDuration(table string, duration time.Duration) {
-	// Placeholder: ps.processingSeconds.WithLabelValues(table).Observe(duration.Seconds())
-	ps.logger.Debug(context.Background(), "Metric: ObserveProcessingDuration (stub)", zap.String("table", table), zap.Duration("duration", duration))
-}
-
-func (ps *PrometheusSink) IncPublishErrors() {
-	// Placeholder: ps.publishErrorsTotal.Inc()
-	ps.logger.Debug(context.Background(), "Metric: IncPublishErrors (stub)")
-}
-
-func (ps *PrometheusSink) IncRedisHit(hit bool) {
-	hitOrMiss := "miss"
-	if hit {
-		hitOrMiss = "hit"
-	}
-	// Placeholder: ps.redisHitsTotal.WithLabelValues(hitOrMiss).Inc()
-	ps.logger.Debug(context.Background(), "Metric: IncRedisHit (stub)", zap.String("type", hitOrMiss))
-}
-
-func (ps *PrometheusSink) SetConsumerLag(lag float64) {
-	// Placeholder: ps.consumerLag.Set(lag)
-	ps.logger.Debug(context.Background(), "Metric: SetConsumerLag (stub)", zap.Float64("lag", lag))
 }

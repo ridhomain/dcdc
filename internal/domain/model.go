@@ -158,7 +158,7 @@ type MessageData struct {
 	MessageObj       interface{} `json:"message_obj,omitempty"` // Was datatypes.JSON
 	Key              interface{} `json:"key,omitempty"`         // Was datatypes.JSON
 	Status           string      `json:"status,omitempty"`
-	IsDeleted        bool        `json:"is_deleted,omitempty"`
+	IsDeleted        bool        `json:"is_deleted"`
 	MessageTimestamp int64       `json:"message_timestamp,omitempty"`
 	MessageDate      CustomDate  `json:"message_date"` // Assuming it's not omitempty since not null
 	CreatedAt        time.Time   `json:"created_at,omitempty"`

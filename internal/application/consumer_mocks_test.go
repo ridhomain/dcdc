@@ -141,6 +141,12 @@ func (m *mockMetricsSink) SetConsumerLag(lag float64) {
 func (m *mockMetricsSink) IncUnhandledFieldsTotal(table, fieldName string) {
 	m.Called(table, fieldName)
 }
+func (m *mockMetricsSink) IncEventsPublished(subject string, status string) {
+	m.Called(subject, status)
+}
+func (m *mockMetricsSink) IncDedupCheck(table string, result string) {
+	m.Called(table, result)
+}
 
 // mockEventTransformer
 type mockEventTransformer struct {

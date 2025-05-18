@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -20,6 +21,7 @@ const (
 type DedupStore struct {
 	configProvider domain.ConfigProvider
 	logger         domain.Logger
+	metricsSink    domain.MetricsSink
 	redisClient    *redis.Client
 }
 
@@ -27,6 +29,7 @@ type DedupStore struct {
 func NewDedupStore(
 	cfg domain.ConfigProvider,
 	log domain.Logger,
+	metrics domain.MetricsSink,
 ) (*DedupStore, error) {
 	logger := log.With(zap.String("component", "redis_dedup_store"))
 
@@ -59,8 +62,18 @@ func NewDedupStore(
 	return &DedupStore{
 		configProvider: cfg,
 		logger:         logger,
+		metricsSink:    metrics,
 		redisClient:    client,
 	}, nil
+}
+
+// extractTableFromEventID extracts the table name from an EventID string (format: LSN:Table:PK)
+func extractTableFromEventID(eventID domain.EventID) string {
+	parts := strings.SplitN(string(eventID), ":", 3)
+	if len(parts) > 1 {
+		return parts[1] // The second part is the table name
+	}
+	return "unknown_table" // Fallback, though eventID should always be valid
 }
 
 // IsDuplicate checks if the given eventID has been seen within the specified TTL.
@@ -68,6 +81,8 @@ func NewDedupStore(
 // It implements the domain.DedupStore interface.
 func (s *DedupStore) IsDuplicate(ctx context.Context, eventID domain.EventID, ttl time.Duration) (bool, error) {
 	redisKey := dedupKeyPrefix + string(eventID)
+	tableName := extractTableFromEventID(eventID)
+
 	s.logger.Debug(ctx, "Checking for duplicate event in Redis",
 		zap.String("redis_key", redisKey),
 		zap.Duration("ttl", ttl),
@@ -92,9 +107,11 @@ func (s *DedupStore) IsDuplicate(ctx context.Context, eventID domain.EventID, tt
 	isDuplicate := !wasSet
 
 	if isDuplicate {
-		s.logger.Info(ctx, "Event determined to be a duplicate", zap.String("redis_key", redisKey))
+		s.logger.Info(ctx, "Event determined to be a duplicate", zap.String("redis_key", redisKey), zap.String("table_name", tableName))
+		s.metricsSink.IncDedupCheck(tableName, "hit")
 	} else {
-		s.logger.Info(ctx, "Event determined to be new", zap.String("redis_key", redisKey))
+		s.logger.Info(ctx, "Event determined to be new", zap.String("redis_key", redisKey), zap.String("table_name", tableName))
+		s.metricsSink.IncDedupCheck(tableName, "miss")
 	}
 	return isDuplicate, nil
 }

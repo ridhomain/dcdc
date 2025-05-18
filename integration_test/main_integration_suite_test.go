@@ -1,15 +1,20 @@
 package integration_test
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	natsIO "github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/suite"
@@ -50,6 +55,11 @@ type IntegrationTestSuite struct {
 
 	// For ENV var restoration
 	originalEnvValues map[string]string
+
+	// For WA stream subscription
+	waNatsConn         *natsIO.Conn
+	waSubscription     *natsIO.Subscription
+	receivedWaMessages chan *natsIO.Msg // Buffered channel to store messages from wa_stream
 }
 
 // SetupSuite runs once before all tests in the suite.
@@ -140,6 +150,30 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Logf("Application metrics server should be running on port %s (started by DI)", s.appMetricsPort)
 	time.Sleep(2 * time.Second)
 	s.T().Log("Integration test suite setup complete with application initialized.")
+
+	// Setup NATS subscription for wa_stream to capture published application events
+	s.T().Logf("TestHelper: Setting up NATS subscription to WA stream subjects on NATS server %s", s.natsURL)
+	s.waNatsConn, err = natsIO.Connect(s.natsURL,
+		natsIO.Timeout(10*time.Second),
+		natsIO.RetryOnFailedConnect(true),
+		natsIO.MaxReconnects(3),
+		natsIO.ReconnectWait(1*time.Second),
+	)
+	s.Require().NoError(err, "SetupSuite: Failed to connect waNatsConn to NATS at %s", s.natsURL)
+
+	s.receivedWaMessages = make(chan *natsIO.Msg, 100) // Buffer of 100 messages
+
+	waStreamSubjects := "wa.>" // Default, can be overridden by config if necessary for tests later
+	if s.appContainer != nil && s.appContainer.Cfg != nil {
+		cfgWaSubjects := s.appContainer.Cfg.GetString(config.KeyJSWaStreamSubjects)
+		if cfgWaSubjects != "" {
+			waStreamSubjects = cfgWaSubjects
+		}
+	}
+	s.T().Logf("TestHelper: Subscribing waNatsConn to subjects: %s", waStreamSubjects)
+	s.waSubscription, err = s.waNatsConn.ChanSubscribe(waStreamSubjects, s.receivedWaMessages)
+	s.Require().NoError(err, "SetupSuite: Failed to subscribe waNatsConn to subjects '%s'", waStreamSubjects)
+	s.Require().True(s.waSubscription.IsValid(), "SetupSuite: WA stream subscription should be valid")
 }
 
 // TearDownSuite runs once after all tests in the suite are finished.
@@ -177,10 +211,64 @@ func (s *IntegrationTestSuite) TearDownSuite() {
 		s.NoError(err, "TearDownSuite: Failed to terminate Redis container")
 	}
 
+	// Drain and close WA stream subscription and connection
+	if s.waSubscription != nil && s.waSubscription.IsValid() {
+		s.T().Log("TestHelper: Draining WA stream subscription...")
+		if err := s.waSubscription.Drain(); err != nil {
+			s.T().Logf("TestHelper: Error draining WA stream subscription: %v", err)
+		}
+		// Unsubscribe is often implicitly handled by Drain + connection close, but explicit can be good
+		// if err := s.waSubscription.Unsubscribe(); err != nil {
+		// 	s.T().Logf("TestHelper: Error unsubscribing WA stream: %v", err)
+		// }
+	}
+	if s.waNatsConn != nil {
+		s.T().Log("TestHelper: Draining and closing WA NATS connection...")
+		if !s.waNatsConn.IsClosed() {
+			if err := s.waNatsConn.Drain(); err != nil {
+				s.T().Logf("TestHelper: Error draining WA NATS connection: %v", err)
+			}
+			s.waNatsConn.Close()
+		}
+	}
+	if s.receivedWaMessages != nil {
+		close(s.receivedWaMessages)
+	}
+
 	if s.cancel != nil {
 		s.cancel()
 	}
 	s.T().Log("Integration test suite teardown complete.")
+}
+
+// waitForPublishedWaMessage waits for a message on the WA stream that matches the criteria.
+func (s *IntegrationTestSuite) waitForPublishedWaMessage(timeout time.Duration, criteria func(msgData []byte) bool) (*natsIO.Msg, error) {
+	s.T().Helper()
+	timeoutCtx, cancel := context.WithTimeout(s.appCtx, timeout) // Use appCtx as base, can be suite ctx too
+	defer cancel()
+
+	s.T().Logf("TestHelper: Waiting for message on WA stream for up to %s...", timeout)
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("timed out waiting for message on WA stream after %s: %w", timeout, timeoutCtx.Err())
+		case msg, ok := <-s.receivedWaMessages:
+			if !ok {
+				return nil, fmt.Errorf("receivedWaMessages channel was closed while waiting")
+			}
+			if msg == nil { // Should not happen with a well-behaved ChanSubscribe
+				continue
+			}
+			s.T().Logf("TestHelper: Received candidate message on WA stream. Subject: %s, Size: %d bytes", msg.Subject, len(msg.Data))
+			if criteria(msg.Data) {
+				s.T().Logf("TestHelper: Criteria met for message on subject '%s'", msg.Subject)
+				return msg, nil
+			} else {
+				s.T().Logf("TestHelper: Criteria NOT met for message on subject '%s'. Continuing to wait...", msg.Subject)
+			}
+		}
+	}
 }
 
 // TestAppComponentsInitialization verifies that essential app components are not nil.
@@ -284,7 +372,302 @@ func (s *IntegrationTestSuite) TestRedisContainerRawConnection() {
 	s.T().Log("TestRedisContainerRawConnection: Successfully connected to Redis and PING was successful.")
 }
 
-// TestRunIntegrationSuite is the entry point for running the integration test suite.
+// --- Prometheus Metrics Helper ---
+
+// getMetricValue parses Prometheus text format and extracts the value of a specific metric with given labels.
+// This is a simplified parser; for complex scenarios, a proper Prometheus client library might be better.
+func getMetricValue(t *testing.T, metricsBody string, metricName string, labels map[string]string) (float64, error) {
+	t.Helper()
+	scanner := bufio.NewScanner(strings.NewReader(metricsBody))
+	lookingFor := metricName
+	if len(labels) > 0 {
+		lookingFor += "{"
+		labelParts := []string{}
+		for k, v := range labels {
+			labelParts = append(labelParts, fmt.Sprintf(`%s="%s"`, k, v))
+		}
+		sort.Strings(labelParts) // Labels need to be in alphabetical order as Prometheus exports them
+		lookingFor += strings.Join(labelParts, ",")
+		lookingFor += "}"
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") { // Skip comments and type lines
+			continue
+		}
+		if strings.HasPrefix(line, lookingFor+" ") { // Ensure it's the exact metric, followed by a space then value
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				valueStr := parts[len(parts)-1] // Value is the last part
+				value, err := strconv.ParseFloat(valueStr, 64)
+				if err != nil {
+					return 0, fmt.Errorf("failed to parse metric value '%s' for '%s': %w", valueStr, line, err)
+				}
+				return value, nil
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("error scanning metrics body: %w", err)
+	}
+	return 0, fmt.Errorf("metric '%s' with labels %v not found", metricName, labels)
+}
+
+// fetchMetrics retrieves the current metrics from the application's /metrics endpoint.
+func (s *IntegrationTestSuite) fetchMetrics(t *testing.T) string {
+	t.Helper()
+	s.Require().NotEmpty(s.appMetricsPort, "fetchMetrics: appMetricsPort is not set")
+
+	httpClient := http.Client{Timeout: 5 * time.Second}
+	metricsURL := fmt.Sprintf("http://localhost:%s/metrics", s.appMetricsPort)
+	resp, err := httpClient.Get(metricsURL)
+	s.Require().NoError(err, "fetchMetrics: HTTP GET to /metrics endpoint failed")
+	defer resp.Body.Close()
+
+	s.Require().Equal(http.StatusOK, resp.StatusCode, "fetchMetrics: /metrics endpoint should return 200 OK")
+	bodyBytes, err := io.ReadAll(resp.Body)
+	s.Require().NoError(err, "fetchMetrics: Failed to read /metrics response body")
+	return string(bodyBytes)
+}
+
+// --- Test Methods ---
+
+// TestHappyPath_SingleMessage_MessagesTable tests the end-to-end happy path for a single CDC event.
+func (s *IntegrationTestSuite) TestHappyPath_SingleMessage_MessagesTable() {
+	s.T().Log("Running TestHappyPath_SingleMessage_MessagesTable...")
+
+	// 1. Prepare a sample CDCEventData for the 'messages' table
+	testCompanyID := "test-company-happy-456"
+	testMessagePK := fmt.Sprintf("msg_happy_%s", uuid.NewString()[0:8]) // Unique message ID
+	now := time.Now().UTC()
+
+	sampleMessageData := domain.MessageData{
+		ID:               now.UnixNano() / 1000, // Example of a unique int64 ID
+		MessageID:        testMessagePK,
+		ChatID:           "chat_happy_789",
+		AgentID:          "agent_happy_abc",
+		CompanyID:        testCompanyID,
+		From:             "user@example.com",
+		To:               "agent@example.com",
+		Jid:              "user@example.com/resource",
+		Flow:             "inbound",
+		MessageObj:       map[string]interface{}{"type": "text", "text": "Hello from happy path E2E test!"},
+		Key:              map[string]interface{}{"id": uuid.NewString(), "remoteJid": "user@example.com", "fromMe": false},
+		Status:           "delivered",
+		IsDeleted:        false,
+		MessageTimestamp: now.UnixMilli(),
+		MessageDate:      domain.CustomDate{Time: now},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	recordData := make(map[string]interface{})
+	messageDataJSON, err := json.Marshal(sampleMessageData)
+	s.Require().NoError(err, "Failed to marshal sampleMessageData")
+	err = json.Unmarshal(messageDataJSON, &recordData)
+	s.Require().NoError(err, "Failed to unmarshal messageDataJSON to recordData map")
+
+	commitLSN := now.UnixNano()
+
+	sampleCDCEvent := domain.CDCEventData{
+		Record:  recordData,
+		Changes: nil,
+		Action:  "insert",
+		Metadata: struct {
+			TableSchema            string                 `json:"table_schema"`
+			TableName              string                 `json:"table_name"`
+			CommitTimestamp        string                 `json:"commit_timestamp"`
+			CommitLSN              int64                  `json:"commit_lsn"`
+			IdempotencyKey         string                 `json:"idempotency_key"`
+			TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+			Sink                   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"sink"`
+		}{
+			TableSchema:     "public", // Default schema used by Sequin/test
+			TableName:       "messages",
+			CommitTimestamp: now.Format(time.RFC3339Nano),
+			CommitLSN:       commitLSN,
+			IdempotencyKey:  uuid.New().String(),
+			Sink: struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}{
+				ID:   "test-sink-id",
+				Name: "test-sequin-sink",
+			},
+		},
+		PK:        map[string]interface{}{"id": sampleMessageData.ID},
+		TypedData: &sampleMessageData,
+	}
+
+	// Construct the subject for publishing the raw CDC event, mimicking Sequin's pattern
+	// sequin.changes.<database_name>.<schema_name>.<table_name>.<action>
+	// The consumer subscribes to a pattern like this via KeyJSCdcStreamSubjects
+	// (e.g., default "sequin.changes.*.*.*.*")
+	cdcPublishSubject := fmt.Sprintf("sequin.changes.test_db.%s.%s.%s",
+		sampleCDCEvent.Metadata.TableSchema,
+		sampleCDCEvent.Metadata.TableName,
+		sampleCDCEvent.Action,
+	)
+	s.T().Logf("Publishing raw CDC event to subject: %s", cdcPublishSubject)
+
+	// 2. Publish the event using the helper from event_helpers_test.go
+	// This helper connects its own NATS client using s.natsURL.
+	err = publishCDCEvent(s.T(), s, cdcPublishSubject, sampleCDCEvent) // Pass by value
+	s.Require().NoError(err, "Failed to publish CDC event")
+	s.T().Logf("Published sample CDC event for MessageID: %s, LSN: %d", sampleMessageData.MessageID, sampleCDCEvent.Metadata.CommitLSN)
+
+	// 3. Wait for the enriched message on wa_stream
+	expectedOriginalMessageID := sampleMessageData.MessageID
+	s.T().Logf("Waiting for enriched message on WA stream corresponding to original MessageID: %s", expectedOriginalMessageID)
+
+	receivedMsg, err := s.waitForPublishedWaMessage(15*time.Second, func(msgData []byte) bool {
+		var enrichedPayload domain.EnrichedEventPayload
+		if jsonErr := json.Unmarshal(msgData, &enrichedPayload); jsonErr != nil {
+			s.T().Logf("waitForPublishedWaMessage criteria: Error unmarshalling msgData: %v", jsonErr)
+			return false
+		}
+		return enrichedPayload.MessageID == expectedOriginalMessageID &&
+			enrichedPayload.CompanyID == sampleMessageData.CompanyID &&
+			enrichedPayload.AgentID == sampleMessageData.AgentID
+	})
+	s.Require().NoError(err, "Did not receive expected message on wa_stream within timeout")
+	s.Require().NotNil(receivedMsg, "Received nil message from wa_stream")
+	s.T().Logf("Received message on WA stream. Subject: %s", receivedMsg.Subject)
+
+	// 4. Unmarshal and validate the enriched message
+	var enrichedPayload domain.EnrichedEventPayload
+	err = json.Unmarshal(receivedMsg.Data, &enrichedPayload)
+	s.Require().NoError(err, "Failed to unmarshal enriched event payload from WA stream message")
+
+	s.T().Logf("Successfully unmarshalled EnrichedEventPayload. EventID: %s, CompanyID: %s, AgentID: %s, MessageID: %s, ChatID: %s",
+		enrichedPayload.EventID, enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.MessageID, enrichedPayload.ChatID)
+
+	s.NotEmpty(enrichedPayload.EventID, "EnrichedEventPayload.EventID should not be empty")
+	s.Equal(sampleMessageData.CompanyID, enrichedPayload.CompanyID, "Enriched CompanyID mismatch")
+	s.Equal(sampleMessageData.AgentID, enrichedPayload.AgentID, "Enriched AgentID mismatch")
+	s.Equal(sampleMessageData.MessageID, enrichedPayload.MessageID, "Enriched MessageID mismatch")
+	s.Equal(sampleMessageData.ChatID, enrichedPayload.ChatID, "Enriched ChatID mismatch")
+
+	s.Require().NotNil(enrichedPayload.RowData, "EnrichedEventPayload.RowData is nil")
+	s.T().Logf("Enriched RowData: %+v", enrichedPayload.RowData)
+
+	s.assertRowDataField(enrichedPayload.RowData, "id", float64(sampleMessageData.ID))
+	s.assertRowDataField(enrichedPayload.RowData, "message_id", sampleMessageData.MessageID)
+	s.assertRowDataField(enrichedPayload.RowData, "chat_id", sampleMessageData.ChatID)
+	s.assertRowDataField(enrichedPayload.RowData, "agent_id", sampleMessageData.AgentID)
+	s.assertRowDataField(enrichedPayload.RowData, "company_id", sampleMessageData.CompanyID)
+	s.assertRowDataField(enrichedPayload.RowData, "from", sampleMessageData.From)
+	s.assertRowDataField(enrichedPayload.RowData, "to", sampleMessageData.To)
+	s.assertRowDataField(enrichedPayload.RowData, "flow", sampleMessageData.Flow)
+	s.assertRowDataField(enrichedPayload.RowData, "status", sampleMessageData.Status)
+	s.assertRowDataField(enrichedPayload.RowData, "is_deleted", sampleMessageData.IsDeleted)
+	s.assertRowDataField(enrichedPayload.RowData, "message_timestamp", float64(sampleMessageData.MessageTimestamp))
+
+	expectedMessageDateStr := sampleMessageData.MessageDate.Time.Format("2006-01-02")
+	s.assertRowDataField(enrichedPayload.RowData, "message_date", expectedMessageDateStr)
+
+	expectedMessageObjJSON, err := json.Marshal(sampleMessageData.MessageObj)
+	s.Require().NoError(err, "Failed to marshal expected MessageObj")
+	actualMessageObjRaw, ok := enrichedPayload.RowData["message_obj"]
+	s.Require().True(ok, "RowData.message_obj not found")
+	actualMessageObjJSON, err := json.Marshal(actualMessageObjRaw)
+	s.Require().NoError(err, "Failed to marshal actual MessageObj from RowData")
+	s.JSONEq(string(expectedMessageObjJSON), string(actualMessageObjJSON), "RowData.message_obj mismatch")
+
+	expectedKeyJSON, err := json.Marshal(sampleMessageData.Key)
+	s.Require().NoError(err, "Failed to marshal expected Key")
+	actualKeyRaw, ok := enrichedPayload.RowData["key"]
+	s.Require().True(ok, "RowData.key not found")
+	actualKeyJSON, err := json.Marshal(actualKeyRaw)
+	s.Require().NoError(err, "Failed to marshal actual Key from RowData")
+	s.JSONEq(string(expectedKeyJSON), string(actualKeyJSON), "RowData.key mismatch")
+
+	// Verify the EventID construction (LSN:Table:PK)
+	expectedEventID := fmt.Sprintf("%d:%s:%s", sampleCDCEvent.Metadata.CommitLSN, "messages", sampleMessageData.MessageID)
+	s.Equal(expectedEventID, enrichedPayload.EventID, "Enriched EventID does not match expected format")
+
+	// 4. Verify Prometheus metrics
+	s.T().Log("Verifying Prometheus metrics after happy path event...")
+	time.Sleep(1 * time.Second) // Give Prometheus a moment to scrape
+
+	metricsBody := s.fetchMetrics(s.T())
+
+	consumerProcessedMetricName := "cdc_consumer_events_total"
+	publisherPublishedMetricName := "cdc_consumer_events_published_total" // Corrected metric name
+	// deduplicationMetricName := "daisi_cdc_consumer_deduplication_checks_total" // Assuming this is defined elsewhere or will be added
+
+	processedCount, err := getMetricValue(s.T(), metricsBody, consumerProcessedMetricName, map[string]string{"table": "messages", "result": "processed"})
+	s.Require().NoError(err, "Failed to get metric: %s", consumerProcessedMetricName)
+	s.True(processedCount >= 1, "Expected at least 1 event processed for messages table, got %.f", processedCount)
+	s.T().Logf("Metric %s{table=\"messages\", result=\"processed\"}: %f", consumerProcessedMetricName, processedCount)
+
+	// Construct the expected subject based on transform_service.go logic
+	// wa.{companyID}.{agentID}.messages.{chatID}
+	expectedPublishedSubject := fmt.Sprintf("wa.%s.%s.messages.%s",
+		enrichedPayload.CompanyID, // This comes from the enriched message itself
+		enrichedPayload.AgentID,
+		enrichedPayload.ChatID,
+	)
+
+	publishedCount, err := getMetricValue(s.T(), metricsBody, publisherPublishedMetricName, map[string]string{"subject": expectedPublishedSubject, "status": "success"})
+	s.Require().NoError(err, "Failed to get metric: %s for subject %s", publisherPublishedMetricName, expectedPublishedSubject)
+	s.True(publishedCount >= 1, "Expected at least 1 event published to subject %s, got %.f", expectedPublishedSubject, publishedCount)
+	s.T().Logf("Metric %s{subject=\"%s\", status=\"success\"}: %f", publisherPublishedMetricName, expectedPublishedSubject, publishedCount)
+
+	// TODO: Add assertion for deduplicationMetricName once implemented and clear on its labels
+	// LSN:Table:PK -> 1747548515414825000:messages:msg_happy_464a207b
+	// Deduplication key: "cdc_event_id:1747548515414825000:messages:msg_happy_464a207b"
+	// dedupKey := "cdc_event_id:" + enrichedPayload.EventID // This should be the key used by DedupStore
+	// dedupCheckCount, err := getMetricValue(s.T(), metricsBody, "daisi_cdc_consumer_deduplication_checks_total", map[string]string{"result": "miss"}) // or "hit"
+	// s.Require().NoError(err, "Failed to get metric for deduplication checks")
+	// s.True(dedupCheckCount >= 1, "Expected at least 1 deduplication check")
+
+	s.T().Log("TestHappyPath_SingleMessage_MessagesTable completed successfully.")
+}
+
+// assertRowDataField is a helper to assert values in the RowData map, handling potential type differences.
+func (s *IntegrationTestSuite) assertRowDataField(rowData map[string]interface{}, key string, expectedValue interface{}) {
+	s.T().Helper()
+	actualValue, ok := rowData[key]
+	if !ok {
+		s.Failf("RowData assertion failed", "Key '%s' not found in RowData", key)
+		return
+	}
+
+	// Handle float64 that might have been int64/int32 etc.
+	if expectedFloat, ok := expectedValue.(float64); ok {
+		if actualFloat, ok := actualValue.(float64); ok {
+			s.Equal(expectedFloat, actualFloat, "Mismatch for key '%s'. Expected: %v (%T), Actual: %v (%T)", key, expectedValue, expectedValue, actualValue, actualValue)
+			return
+		}
+		// If actualValue is int, convert to float64 for comparison
+		if actualInt, ok := actualValue.(int); ok {
+			s.Equal(expectedFloat, float64(actualInt), "Mismatch for key '%s'. Expected: %v (%T), Actual: %v (%T) (actual was int)", key, expectedValue, expectedValue, actualValue, actualValue)
+			return
+		}
+		if actualInt64, ok := actualValue.(int64); ok {
+			s.Equal(expectedFloat, float64(actualInt64), "Mismatch for key '%s'. Expected: %v (%T), Actual: %v (%T) (actual was int64)", key, expectedValue, expectedValue, actualValue, actualValue)
+			return
+		}
+	}
+
+	// Handle string comparison for dates or other specific string fields directly
+	if expectedStr, ok := expectedValue.(string); ok {
+		if actualStr, ok := actualValue.(string); ok {
+			s.Equal(expectedStr, actualStr, "Mismatch for key '%s'. Expected: %s, Actual: %s", key, expectedStr, actualStr)
+			return
+		}
+	}
+
+	// Default deep equality check for other types (like bool, or if types already match)
+	s.Equal(expectedValue, actualValue, "Mismatch for key '%s'. Expected: %v (%T), Actual: %v (%T)", key, expectedValue, expectedValue, actualValue, actualValue)
+}
+
+// TestRunIntegrationSuite is the entry point for running the suite.
 func TestRunIntegrationSuite(t *testing.T) {
 	suite.Run(t, new(IntegrationTestSuite))
 }

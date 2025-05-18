@@ -50,14 +50,14 @@ func InitializeApp() (*App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	dedupStore, cleanup4, err := provideDedupStore(configProvider, logger)
+	dedupStore, cleanup4, err := provideDedupStore(configProvider, logger, metricsSink)
 	if err != nil {
 		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	publisher, err := providePublisher(configProvider, logger, conn)
+	publisher, err := providePublisher(configProvider, logger, metricsSink, conn)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -230,21 +230,21 @@ func provideWorkerPool(cfg domain.ConfigProvider, log domain.Logger) (*applicati
 	return pool, cleanup, nil
 }
 
-func provideDedupStore(cfg domain.ConfigProvider, log domain.Logger) (domain.DedupStore, func(), error) {
-	store, err := redis2.NewDedupStore(cfg, log)
+func provideDedupStore(cfg domain.ConfigProvider, log domain.Logger, metrics2 domain.MetricsSink) (domain.DedupStore, func(), error) {
+	store, err := redis2.NewDedupStore(cfg, log, metrics2)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create dedup store: %w", err)
 	}
 	cleanup := func() {
 		if err := store.Shutdown(); err != nil {
-			log.Error(context.Background(), "Error shutting down dedup store", zap.Error(err))
+			log.Error(context.Background(), "Failed to shutdown dedup store", zap.Error(err))
 		}
 	}
 	return store, cleanup, nil
 }
 
-func providePublisher(cfg domain.ConfigProvider, log domain.Logger, nc *nats.Conn) (domain.Publisher, error) {
-	pub, err := nats2.NewJetStreamPublisher(cfg, log, nc)
+func providePublisher(cfg domain.ConfigProvider, log domain.Logger, metrics2 domain.MetricsSink, nc *nats.Conn) (domain.Publisher, error) {
+	pub, err := nats2.NewJetStreamPublisher(cfg, log, metrics2, nc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create jetstream publisher: %w", err)
 	}

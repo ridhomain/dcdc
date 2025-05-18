@@ -54,5 +54,7 @@ type MetricsSink interface {
 	IncPublishErrors()
 	IncRedisHit(hit bool) // true for hit, false for miss
 	SetConsumerLag(lag float64)
-	IncUnhandledFieldsTotal(table, fieldName string) // New metric for unhandled CDC fields
+	IncUnhandledFieldsTotal(table, fieldName string)  // New metric for unhandled CDC fields
+	IncEventsPublished(subject string, status string) // New metric for published events
+	IncDedupCheck(table string, result string)        // New metric for deduplication checks (hit/miss)
 }

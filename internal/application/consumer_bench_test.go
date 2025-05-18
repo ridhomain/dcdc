@@ -66,6 +66,8 @@ func (m *benchmarkMetricsSink) IncPublishErrors()                               
 func (m *benchmarkMetricsSink) IncRedisHit(hit bool)                                           {}
 func (m *benchmarkMetricsSink) SetConsumerLag(lag float64)                                     {}
 func (m *benchmarkMetricsSink) IncUnhandledFieldsTotal(table, fieldName string)                {}
+func (m *benchmarkMetricsSink) IncEventsPublished(subject string, status string)               {}
+func (m *benchmarkMetricsSink) IncDedupCheck(table string, result string)                      {}
 
 // benchmarkEventTransformer is a simple mock for application.EventTransformer for benchmarking.
 type benchmarkEventTransformer struct {

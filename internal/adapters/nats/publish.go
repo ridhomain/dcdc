@@ -16,6 +16,7 @@ import (
 type JetStreamPublisher struct {
 	configProvider domain.ConfigProvider
 	logger         domain.Logger
+	metricsSink    domain.MetricsSink
 	natsConn       *nats.Conn
 	jsCtx          nats.JetStreamContext
 }
@@ -25,6 +26,7 @@ type JetStreamPublisher struct {
 func NewJetStreamPublisher(
 	cfg domain.ConfigProvider,
 	log domain.Logger,
+	metrics domain.MetricsSink,
 	nc *nats.Conn, // Accepts an existing NATS connection
 ) (*JetStreamPublisher, error) {
 	logger := log.With(zap.String("component", "nats_publisher"))
@@ -88,6 +90,7 @@ func NewJetStreamPublisher(
 	return &JetStreamPublisher{
 		configProvider: cfg,
 		logger:         logger,
+		metricsSink:    metrics,
 		natsConn:       nc,
 		jsCtx:          js,
 	}, nil
@@ -111,6 +114,9 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, subject string, data [
 			zap.Error(err),
 			zap.String("subject", subject),
 		)
+		p.metricsSink.IncPublishErrors()
+		p.metricsSink.IncEventsPublished(subject, "failure")
+
 		// Check if context was cancelled, as this is a common reason for publish to fail
 		if ctx.Err() != nil {
 			return domain.NewErrExternalService("NATS_publisher_ctx_cancelled", ctx.Err())
@@ -118,6 +124,7 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, subject string, data [
 		return domain.NewErrExternalService("NATS_publisher_send_or_ack", err)
 	}
 
+	p.metricsSink.IncEventsPublished(subject, "success")
 	p.logger.Info(ctx, "Message published successfully to JetStream and ACKed by server",
 		zap.String("subject", subject),
 		zap.String("stream_name_from_ack", ack.Stream),

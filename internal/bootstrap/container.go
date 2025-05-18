@@ -168,21 +168,21 @@ func provideWorkerPool(cfg domain.ConfigProvider, log domain.Logger) (*applicati
 	return pool, cleanup, nil
 }
 
-func provideDedupStore(cfg domain.ConfigProvider, log domain.Logger) (domain.DedupStore, func(), error) {
-	store, err := adapterredis.NewDedupStore(cfg, log)
+func provideDedupStore(cfg domain.ConfigProvider, log domain.Logger, metrics domain.MetricsSink) (domain.DedupStore, func(), error) {
+	store, err := adapterredis.NewDedupStore(cfg, log, metrics)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create dedup store: %w", err)
 	}
 	cleanup := func() {
 		if err := store.Shutdown(); err != nil {
-			log.Error(context.Background(), "Error shutting down dedup store", zap.Error(err))
+			log.Error(context.Background(), "Failed to shutdown dedup store", zap.Error(err))
 		}
 	}
 	return store, cleanup, nil
 }
 
-func providePublisher(cfg domain.ConfigProvider, log domain.Logger, nc *nats.Conn) (domain.Publisher, error) {
-	pub, err := adapternats.NewJetStreamPublisher(cfg, log, nc)
+func providePublisher(cfg domain.ConfigProvider, log domain.Logger, metrics domain.MetricsSink, nc *nats.Conn) (domain.Publisher, error) {
+	pub, err := adapternats.NewJetStreamPublisher(cfg, log, metrics, nc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create jetstream publisher: %w", err)
 	}
