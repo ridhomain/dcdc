@@ -83,7 +83,7 @@ func InitializeApp() (*App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	app := NewApp(logger, configProvider, conn, metricsSink, server, workerPool, jetStreamIngester)
+	app := NewApp(logger, configProvider, conn, metricsSink, server, workerPool, jetStreamIngester, publisher, dedupStore, consumer)
 	return app, func() {
 		cleanup5()
 		cleanup4()
@@ -299,6 +299,9 @@ type App struct {
 	MetricsServer *http.Server
 	WorkerPool    *application.WorkerPool
 	Ingester      *nats2.JetStreamIngester
+	Publisher     domain.Publisher
+	DedupStore    domain.DedupStore
+	Consumer      *application.Consumer
 }
 
 func NewApp(logger2 domain.Logger,
@@ -309,6 +312,9 @@ func NewApp(logger2 domain.Logger,
 	metricsServer *http.Server,
 	workerPool *application.WorkerPool,
 	ingester *nats2.JetStreamIngester,
+	publisher domain.Publisher,
+	dedupStore domain.DedupStore,
+	consumer *application.Consumer,
 ) *App {
 	return &App{
 		Logger:        logger2,
@@ -318,6 +324,9 @@ func NewApp(logger2 domain.Logger,
 		MetricsServer: metricsServer,
 		WorkerPool:    workerPool,
 		Ingester:      ingester,
+		Publisher:     publisher,
+		DedupStore:    dedupStore,
+		Consumer:      consumer,
 	}
 }
 

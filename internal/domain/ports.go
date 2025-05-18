@@ -15,6 +15,7 @@ type ConfigProvider interface {
 	GetDuration(key string) time.Duration
 	GetInt(key string) int
 	GetBool(key string) bool // Added for completeness, often needed
+	Set(key string, value interface{})
 }
 
 // Logger defines the interface for structured logging throughout the application.

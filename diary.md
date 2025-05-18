@@ -272,3 +272,18 @@
     - Successfully ran `go test -v -count=1 -timeout 6m .` in the `integration_test` directory. All tests in `IntegrationTestSuite` passed, confirming containers start, are accessible, and are torn down correctly.
     - Updated subtask 11.2 in Task Master with details and marked it as 'done'.
 - Ready to proceed with subtask 11.3.
+
+## 2025-05-18T12:35:35+07:00
+
+- Completed Task 11.3: "Initialize Application Under Test with Containerized Dependencies".
+    - Modified `internal/bootstrap/container.go` to expose `Publisher`, `DedupStore`, and `Consumer` on the `App` struct and updated `NewApp` constructor.
+    - User ran `go generate ./...` to update `wire_gen.go`.
+    - Updated `IntegrationTestSuite` in `integration_test/main_integration_suite_test.go`:
+        - Added fields for application components and `originalEnvValues` map.
+        - `SetupSuite` now saves current ENV vars, sets test-specific ENV vars (for NATS, Redis, logging, metrics port, stream names), calls `bootstrap.InitializeApp()`, and extracts app components (Logger, Ingester, Publisher, DedupStore, Consumer).
+        - Corrected logger calls to use `zap.Error(err)`.
+        - `TearDownSuite` now restores original ENV vars, calls `appCleanup()`, and `appCancel()`.
+        - Added new tests: `TestAppComponentsInitialization`, `TestAppNATSConnectionHealth`, `TestAppRedisConnectionHealth`, `TestAppMetricsEndpointAccessible`.
+    - All tests in `TestRunIntegrationSuite` passed, confirming the application starts correctly with containerized dependencies.
+    - Updated subtask 11.3 in Task Master with details and marked it as 'done'.
+- Ready to proceed with subtask 11.4.

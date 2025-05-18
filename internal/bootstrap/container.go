@@ -237,6 +237,9 @@ type App struct {
 	MetricsServer *http.Server
 	WorkerPool    *application.WorkerPool
 	Ingester      *adapternats.JetStreamIngester
+	Publisher     domain.Publisher
+	DedupStore    domain.DedupStore
+	Consumer      *application.Consumer
 }
 
 func NewApp(
@@ -247,6 +250,9 @@ func NewApp(
 	metricsServer *http.Server,
 	workerPool *application.WorkerPool,
 	ingester *adapternats.JetStreamIngester,
+	publisher domain.Publisher,
+	dedupStore domain.DedupStore,
+	consumer *application.Consumer,
 ) *App {
 	return &App{
 		Logger:        logger,
@@ -256,6 +262,9 @@ func NewApp(
 		MetricsServer: metricsServer,
 		WorkerPool:    workerPool,
 		Ingester:      ingester,
+		Publisher:     publisher,
+		DedupStore:    dedupStore,
+		Consumer:      consumer,
 	}
 }
 

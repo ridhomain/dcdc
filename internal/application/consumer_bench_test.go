@@ -92,6 +92,7 @@ type benchmarkConfigProvider struct {
 	GetDurationFunc func(key string) time.Duration
 	GetIntFunc      func(key string) int
 	GetBoolFunc     func(key string) bool
+	SetFunc         func(key string, value interface{})
 }
 
 func (m *benchmarkConfigProvider) GetString(key string) string {
@@ -117,6 +118,11 @@ func (m *benchmarkConfigProvider) GetBool(key string) bool {
 		return m.GetBoolFunc(key)
 	}
 	return false
+}
+func (m *benchmarkConfigProvider) Set(key string, value interface{}) {
+	if m.SetFunc != nil {
+		m.SetFunc(key, value)
+	}
 }
 
 // benchmarkCDCEventMessage is a simple mock for application.CDCEventMessage for benchmarking.

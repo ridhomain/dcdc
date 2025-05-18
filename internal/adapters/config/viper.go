@@ -146,3 +146,8 @@ func (vcp *viperConfigProvider) GetInt(key string) int {
 func (vcp *viperConfigProvider) GetBool(key string) bool {
 	return vcp.viper.GetBool(key)
 }
+
+// Set allows overriding a configuration value. This is primarily intended for testing.
+func (vcp *viperConfigProvider) Set(key string, value interface{}) {
+	vcp.viper.Set(key, value)
+}

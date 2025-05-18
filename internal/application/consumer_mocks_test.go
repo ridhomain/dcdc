@@ -65,6 +65,9 @@ func (m *mockConfigProvider) GetBool(key string) bool {
 	args := m.Called(key)
 	return args.Bool(0)
 }
+func (m *mockConfigProvider) Set(key string, value interface{}) {
+	m.Called(key, value)
+}
 
 // mockLogger
 type mockLogger struct {
