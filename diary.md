@@ -325,3 +325,29 @@ Next Subtask: **Subtask 11.6: Test Skipped Table Scenario**
   - It asserts that no message is published to the `wa_stream` for such events.
   - It checks that the `cdc_consumer_events_total` metric with `result="skipped"` for the specific table is incremented, and other processing/deduplication metrics for that table remain unaffected.
   - Corrected an initial linter error by properly checking for key existence in the `domain.AllowedTables` map (`map[string]struct{}`) using the `_, ok := ...` idiom.
+
+## 2025-05-18T14:15:59+07:00 - Subtask 11.6: Test Skipped Table Scenario (Completed)
+
+- User confirmed that all integration tests passed after adding `TestSkippedTableHandling`.
+- This verifies the correct filtering of events from unallowed tables and associated metrics.
+- Marked subtask 11.6 as "done".
+
+## 2025-05-18T14:18:25+07:00 - Subtask 11.7: Simulate Publish Failures and Max Redeliveries
+
+- Marked subtask 11.7 as "in-progress".
+- Added the `TestPublishFailuresAndRedelivery` test case to `integration_test/main_integration_suite_test.go`.
+  - This test aims to verify the application's behavior when publishing to NATS JetStream fails.
+  - **Method to Induce Failure**: The test temporarily reconfigures the target `wa_stream` by changing its allowed subjects. This causes the application's publisher to fail when attempting to publish to the original, now invalid, subjects for that stream.
+  - **Redelivery Observation**: The test relies on the NATS JetStream consumer's `MaxDeliver` setting (expected to be 3 by default or via config `DAISI_CDC_JS_MAX_DELIVER`). It verifies that the message which fails to publish is not ultimately delivered to `wa_stream` after these retry attempts, and that appropriate metrics (publish failures, processing errors due to publish failure) are incremented.
+  - Added a helper function `mustMarshalToMap` for test data preparation.
+  - **Attempt 5 (2025-05-18T16:27:35+07:00)**: Major strategy change for `TestPublishFailuresAndRedelivery`. The test now:
+        1. Configures `wa_stream` to be full (`MaxMsgs` = current count, `Discard=DiscardNew`).
+        2. Publishes the `failCDCEvent` to the input CDC stream (`sequin.changes...`).
+        3. Briefly waits (1s) for the app ingester to potentially pick up the event.
+        4. Stops the main NATS container (`s.natsContainer.Stop()`).
+        5. Waits for a period (`ackWait + 5s`) allowing the app to attempt publishing to the (now down) NATS and for the CDC message to be NACKed/timeout.
+        6. Restarts the NATS container (`s.natsContainer.Start()`).
+        7. The app ingester should reconnect, receive the redelivered `failCDCEvent`.
+        8. The app attempts to publish to `wa_stream`, which is *still configured to be full*, leading to `maxDeliver` publish failures.
+        9. Asserts the message does not appear on `wa_stream` and that publish failure metrics increment by `maxDeliver`.
+        - Added `createTestMetadata` helper to reduce boilerplate.

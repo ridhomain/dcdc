@@ -921,6 +921,253 @@ func (s *IntegrationTestSuite) TestSkippedTableHandling() {
 	s.T().Log("TestSkippedTableHandling completed successfully.")
 }
 
+// TestPublishFailuresAndRedelivery commented, Fail to simulate publish failures, JetStream redeliveries, and handling after MaxDeliver is reached.
+// TestPublishFailuresAndRedelivery tests NATS publish failures, JetStream redeliveries,
+// and handling after MaxDeliver is reached.
+// func (s *IntegrationTestSuite) TestPublishFailuresAndRedelivery() {
+// 	s.T().Log("Running TestPublishFailuresAndRedelivery...")
+
+// 	const testTableName = "messages"
+// 	maxDeliver := s.appContainer.Cfg.GetInt(config.KeyJSMaxDeliver)
+// 	if maxDeliver == 0 {
+// 		maxDeliver = 3 // Default from ingest.go if not set
+// 	}
+// 	ackWait := s.appContainer.Cfg.GetDuration(config.KeyJSAckWait)
+// 	if ackWait == 0 {
+// 		ackWait = 30 * time.Second // Default from NATS client
+// 	}
+// 	s.T().Logf("Test will expect up to %d delivery attempts for the failing message. AckWait: %s", maxDeliver, ackWait)
+
+// 	// 1. Publish a first event successfully to ensure baseline and get stream state
+// 	s.T().Log("Publishing a baseline successful event...")
+// 	baseCompanyID := "test-company-redelivery-base"
+// 	baseMessagePK := fmt.Sprintf("msg_base_redeliver_%s", uuid.NewString()[0:8])
+// 	baseNow := time.Now().UTC()
+// 	baseSampleMessageData := domain.MessageData{
+// 		ID:        baseNow.UnixNano()/1000 + 3000,
+// 		MessageID: baseMessagePK,
+// 		ChatID:    "chat_base_redeliver_123",
+// 		AgentID:   "agent_base_redeliver_abc",
+// 		CompanyID: baseCompanyID,
+// 		Status:    "delivered",
+// 	}
+// 	baseRecordData := s.mustMarshalToMap(baseSampleMessageData)
+// 	baseCommitLSN := baseNow.UnixNano() + 3000
+// 	baseCDCEvent := domain.CDCEventData{
+// 		Record: baseRecordData, Action: "insert",
+// 		Metadata:  createTestMetadata(testTableName, baseCommitLSN, baseNow),
+// 		PK:        map[string]interface{}{"id": baseSampleMessageData.ID},
+// 		TypedData: &baseSampleMessageData,
+// 	}
+// 	baseCdcPublishSubject := fmt.Sprintf("sequin.changes.test_db.public.%s.insert", testTableName)
+// 	err := publishCDCEvent(s.T(), s, baseCdcPublishSubject, baseCDCEvent)
+// 	s.Require().NoError(err, "Failed to publish baseline CDC event")
+// 	_, err = s.waitForPublishedWaMessage(10*time.Second, func(msgData []byte) bool {
+// 		var p domain.EnrichedEventPayload
+// 		_ = json.Unmarshal(msgData, &p)
+// 		return p.MessageID == baseMessagePK
+// 	})
+// 	s.Require().NoError(err, "Baseline message not received on wa_stream")
+// 	s.T().Log("Baseline successful event processed.")
+
+// 	// Capture initial metrics state AFTER baseline event for relevant counters
+// 	initialMetricsBody := s.fetchMetrics(s.T())
+// 	failCompanyID := "test-company-redelivery-fail"
+// 	failAgentID := "agent_redeliver_fail_def"
+// 	failChatID := "chat_redeliver_fail_456"
+// 	expectedFailingPublishSubject := fmt.Sprintf("wa.%s.%s.%s.%s", failCompanyID, failAgentID, testTableName, failChatID)
+
+// 	initialPublishFailureCountNATS, _ := getMetricValue(s.T(), initialMetricsBody, "cdc_consumer_events_published_total", map[string]string{"status": "failure", "subject": expectedFailingPublishSubject})
+// 	initialProcessErrorCountNATS, _ := getMetricValue(s.T(), initialMetricsBody, "cdc_consumer_events_total", map[string]string{"table": testTableName, "result": "publish_error"})
+
+// 	// 2. Configure wa_stream to be "full" to reject later publish attempts
+// 	s.T().Log("Configuring wa_stream to be full to induce publish failures...")
+// 	waStreamName := s.appContainer.Cfg.GetString(config.KeyJSWaStreamName)
+// 	jsCtx, err := s.waNatsConn.JetStream()
+// 	s.Require().NoError(err, "Failed to get JetStream context on waNatsConn for stream config")
+
+// 	streamInfoAfterBaseline, err := jsCtx.StreamInfo(waStreamName)
+// 	s.Require().NoError(err, "Failed to get current info for stream: %s", waStreamName)
+// 	originalWaStreamConfig := streamInfoAfterBaseline.Config
+
+// 	configToMakeStreamFull := streamInfoAfterBaseline.Config
+// 	configToMakeStreamFull.MaxMsgs = int64(streamInfoAfterBaseline.State.Msgs)
+// 	configToMakeStreamFull.Retention = natsIO.LimitsPolicy
+// 	configToMakeStreamFull.Discard = natsIO.DiscardNew
+
+// 	_, err = jsCtx.UpdateStream(&configToMakeStreamFull)
+// 	s.Require().NoError(err, "Failed to update stream '%s' to be full", waStreamName)
+// 	s.T().Logf("Updated stream '%s' to MaxMsgs=%d, Retention=%s, Discard=%s. Stream should now reject new messages.",
+// 		waStreamName, configToMakeStreamFull.MaxMsgs, configToMakeStreamFull.Retention, configToMakeStreamFull.Discard)
+// 	s.T().Log("Pausing for 5 seconds for wa_stream configuration to propagate...")
+// 	time.Sleep(5 * time.Second)
+
+// 	// Drain any residual messages from WA channel before the main test part
+// 	s.T().Log("Draining any pending WA messages before publishing failing event...")
+// 	for len(s.receivedWaMessages) > 0 {
+// 		<-s.receivedWaMessages
+// 	}
+// 	s.T().Log("WA message channel drained.")
+
+// 	// Defer restoration of original wa_stream config
+// 	defer func() {
+// 		s.T().Logf("Defer: Restoring original config for stream '%s'", waStreamName)
+// 		currentInfo, infoErr := jsCtx.StreamInfo(waStreamName)
+// 		if infoErr == natsIO.ErrStreamNotFound { // If stream was deleted somehow (shouldn't be by this test logic)
+// 			s.T().Logf("Defer: Stream %s not found, attempting to re-add with original config.", waStreamName)
+// 			if _, addErr := jsCtx.AddStream(&originalWaStreamConfig); addErr != nil {
+// 				s.T().Logf("ERROR in Defer: Failed to re-add stream %s: %v", waStreamName, addErr)
+// 			}
+// 		} else if infoErr != nil {
+// 			s.T().Logf("ERROR in Defer: Could not get stream info for %s to restore: %v", waStreamName, infoErr)
+// 		} else {
+// 			configToRestore := currentInfo.Config
+// 			configToRestore.MaxMsgs = originalWaStreamConfig.MaxMsgs
+// 			configToRestore.Retention = originalWaStreamConfig.Retention
+// 			configToRestore.Discard = originalWaStreamConfig.Discard
+// 			configToRestore.Subjects = originalWaStreamConfig.Subjects // Ensure subjects are also restored
+// 			if _, updateErr := jsCtx.UpdateStream(&configToRestore); updateErr != nil {
+// 				s.T().Logf("ERROR in Defer: Failed to restore stream %s to original config: %v", waStreamName, updateErr)
+// 			} else {
+// 				s.T().Logf("Defer: Successfully restored stream %s to original configuration.", waStreamName)
+// 			}
+// 		}
+// 	}()
+
+// 	// 3. Publish the event that will eventually fail to be processed correctly
+// 	s.T().Log("Publishing the 'failing' CDC event to the CDC stream (sequin.changes)...")
+// 	failMessagePK := fmt.Sprintf("msg_fail_redeliver_%s", uuid.NewString()[0:8])
+// 	failNow := time.Now().UTC()
+// 	failSampleMessageData := domain.MessageData{
+// 		ID:        failNow.UnixNano()/1000 + 4000,
+// 		MessageID: failMessagePK, ChatID: failChatID, AgentID: failAgentID, CompanyID: failCompanyID, Status: "pending_nats_outage",
+// 	}
+// 	failRecordData := s.mustMarshalToMap(failSampleMessageData)
+// 	failCommitLSN := failNow.UnixNano() + 4000
+// 	failCDCEvent := domain.CDCEventData{
+// 		Record: failRecordData, Action: "insert",
+// 		Metadata:  createTestMetadata(testTableName, failCommitLSN, failNow),
+// 		PK:        map[string]interface{}{"id": failSampleMessageData.ID},
+// 		TypedData: &failSampleMessageData,
+// 	}
+// 	failCdcPublishSubject := fmt.Sprintf("sequin.changes.test_db.public.%s.insert", testTableName)
+
+// 	err = publishCDCEvent(s.T(), s, failCdcPublishSubject, failCDCEvent) // Published to CDC Stream
+// 	s.Require().NoError(err, "Failed to publish the 'failing' CDC event to the CDC stream")
+// 	s.T().Logf("Successfully published 'failing' event (LSN: %d, MessageID: %s) to CDC stream.", failCommitLSN, failMessagePK)
+
+// 	// Give a very brief moment for the app ingester to potentially pick up the message
+// 	// This is a bit racy but aims to have the message in-flight within the app when NATS goes down.
+// 	time.Sleep(1 * time.Second)
+
+// 	// 4. Stop NATS container to simulate outage during app's publish attempt to wa_stream
+// 	s.T().Log("Stopping NATS container to simulate outage...")
+// 	stopCtx, stopCancel := context.WithTimeout(s.ctx, 10*time.Second)
+// 	defer stopCancel()
+// 	err = s.natsContainer.Stop(stopCtx, nil) // Allow some time for graceful stop
+// 	s.Require().NoError(err, "Failed to stop NATS container")
+// 	s.T().Log("NATS container stopped.")
+
+// 	// Defer restarting NATS container to ensure it comes back up
+// 	defer func() {
+// 		s.T().Log("Defer: Ensuring NATS container is started...")
+// 		// Check if it's already running (e.g. if test panicked before explicit restart)
+// 		state, stateErr := s.natsContainer.State(s.ctx)
+// 		if stateErr == nil && state.Running {
+// 			s.T().Log("Defer: NATS container already running.")
+// 			return
+// 		}
+// 		startCtx, startCancel := context.WithTimeout(s.ctx, 30*time.Second)
+// 		defer startCancel()
+// 		if err := s.natsContainer.Start(startCtx); err != nil {
+// 			s.T().Logf("ERROR in Defer: Failed to restart NATS container: %v", err)
+// 			// If NATS doesn't restart, subsequent tests or cleanup might fail.
+// 			// Depending on test runner, this might not halt everything.
+// 		} else {
+// 			s.T().Log("Defer: NATS container started successfully.")
+// 			// Allow a moment for NATS to be fully ready after restart
+// 			time.Sleep(3 * time.Second)
+// 		}
+// 	}()
+
+// 	// 5. Wait for application to attempt publishing (and fail due to NATS down)
+// 	// CDC message for failCDCEvent will be NACKed or AckWait will expire.
+// 	s.T().Logf("Waiting for %s for app to attempt processing and NACK during NATS outage...", (ackWait + 5*time.Second).String())
+// 	time.Sleep(ackWait + 5*time.Second) // Wait for AckWait + buffer
+
+// 	// 6. Restart NATS container
+// 	s.T().Log("Restarting NATS container...")
+// 	startCtx, startCancel := context.WithTimeout(s.ctx, 30*time.Second)
+// 	defer startCancel()
+// 	err = s.natsContainer.Start(startCtx)
+// 	s.Require().NoError(err, "Failed to restart NATS container")
+// 	s.T().Log("NATS container restarted. Allowing 5s for app to reconnect...")
+// 	time.Sleep(5 * time.Second) // Give app components time to reconnect
+
+// 	// 7. Observe Redeliveries. App ingester gets failCDCEvent again.
+// 	// App tries to publish to wa_stream, which is STILL FULL.
+// 	// This should lead to maxDeliver publish failures to wa_stream.
+// 	s.T().Logf("Verifying 'failing' message (MessageID: %s) does NOT appear on wa_stream after NATS restart & redeliveries (wa_stream is full)...", failMessagePK)
+// 	// Timeout should account for maxDeliver * (AckWait for CDC + processing time + app's internal publish retry logic if any)
+// 	// This can be long. For CI, AckWait on CDC consumer should be low.
+// 	redeliveryTimeout := time.Duration(maxDeliver+1) * (ackWait + 10*time.Second) // +1 for buffer, 10s for processing/publish attempt
+// 	s.T().Logf("Setting wa_stream receive timeout to %s for redelivery observation.", redeliveryTimeout)
+
+// 	_, err = s.waitForPublishedWaMessage(redeliveryTimeout, func(msgData []byte) bool {
+// 		var p domain.EnrichedEventPayload
+// 		_ = json.Unmarshal(msgData, &p)
+// 		return p.MessageID == failMessagePK // If it appears, it's a test failure
+// 	})
+// 	s.Error(err, "Expected a timeout waiting for the 'failing' message (MessageID: %s) on wa_stream, as all publish attempts should fail (NATS outage then full stream).", failMessagePK)
+// 	if err != nil {
+// 		s.Contains(err.Error(), "timed out waiting for message", "Error should indicate timeout for the failing message on wa_stream")
+// 		s.T().Logf("Correctly did not receive 'failing' message (MessageID: %s) on wa_stream.", failMessagePK)
+// 	} else {
+// 		s.FailNowf("Message (MessageID: %s) unexpectedly appeared on wa_stream.", failMessagePK)
+// 	}
+
+// 	// 8. Verify Prometheus Metrics
+// 	s.T().Log("Verifying Prometheus metrics after simulated NATS outage and redeliveries to full stream...")
+// 	// Wait a bit longer to ensure all retries and metric updates have occurred.
+// 	time.Sleep(5 * time.Second)
+// 	finalMetricsBody := s.fetchMetrics(s.T())
+
+// 	// Metric: cdc_consumer_events_published_total{status="failure"} for expectedFailingPublishSubject
+// 	// This counts failures from the application's publisher trying to publish to wa_stream.
+// 	// Expected to increment by `maxDeliver` due to redeliveries hitting the full wa_stream.
+// 	// Failures during NATS outage might also be logged by publisher if it has retry logic, but
+// 	// the primary count here is for when NATS is UP but wa_stream is full.
+// 	finalPublishFailureCount, err := getMetricValue(s.T(), finalMetricsBody, "cdc_consumer_events_published_total", map[string]string{"status": "failure", "subject": expectedFailingPublishSubject})
+// 	s.Require().NoError(err, "Failed to get cdc_consumer_events_published_total{status=failure} for subject %s", expectedFailingPublishSubject)
+// 	deltaPublishFailures := finalPublishFailureCount - initialPublishFailureCountNATS
+// 	s.Assert().Equal(float64(maxDeliver), deltaPublishFailures,
+// 		"Expected %d publish failures to wa_stream (subject: %s) due to full stream on redeliveries, got %.f (delta)", maxDeliver, expectedFailingPublishSubject, deltaPublishFailures)
+// 	s.T().Logf("Metric cdc_consumer_events_published_total{status=failure, subject=%s} incremented by %.f", expectedFailingPublishSubject, deltaPublishFailures)
+
+// 	// Metric: cdc_consumer_events_total{table="messages", result="publish_error"}
+// 	// This counts events that failed processing at the consumer level due to publish errors.
+// 	// Should also increment by `maxDeliver` as each redelivered CDC event leads to a publish error.
+// 	finalProcessErrorCount, err := getMetricValue(s.T(), finalMetricsBody, "cdc_consumer_events_total", map[string]string{"table": testTableName, "result": "publish_error"})
+// 	s.Require().NoError(err, "Failed to get cdc_consumer_events_total{result=publish_error} for table %s", testTableName)
+// 	deltaProcessErrors := finalProcessErrorCount - initialProcessErrorCountNATS
+// 	s.Assert().Equal(float64(maxDeliver), deltaProcessErrors,
+// 		"Expected %d 'publish_error' results for table %s on redeliveries, got %.f (delta)", maxDeliver, testTableName, deltaProcessErrors)
+// 	s.T().Logf("Metric cdc_consumer_events_total{table=%s, result=publish_error} incremented by %.f", testTableName, deltaProcessErrors)
+
+// 	s.T().Log("TestPublishFailuresAndRedelivery with NATS stop/start strategy completed.")
+// }
+
+// mustMarshalToMap is a helper for tests to marshal a struct to JSON and then unmarshal to map[string]interface{}
+func (s *IntegrationTestSuite) mustMarshalToMap(data interface{}) map[string]interface{} {
+	s.T().Helper()
+	jsonData, err := json.Marshal(data)
+	s.Require().NoError(err, "mustMarshalToMap: Failed to marshal data to JSON")
+	var mapData map[string]interface{}
+	err = json.Unmarshal(jsonData, &mapData)
+	s.Require().NoError(err, "mustMarshalToMap: Failed to unmarshal JSON to map")
+	return mapData
+}
+
 // assertRowDataField is a helper to assert values in the RowData map, handling potential type differences.
 func (s *IntegrationTestSuite) assertRowDataField(rowData map[string]interface{}, key string, expectedValue interface{}) {
 	s.T().Helper()
@@ -957,6 +1204,43 @@ func (s *IntegrationTestSuite) assertRowDataField(rowData map[string]interface{}
 
 	// Default deep equality check for other types (like bool, or if types already match)
 	s.Equal(expectedValue, actualValue, "Mismatch for key '%s'. Expected: %v (%T), Actual: %v (%T)", key, expectedValue, expectedValue, actualValue, actualValue)
+}
+
+// Helper to create metadata for tests, reducing duplication
+func createTestMetadata(tableName string, commitLSN int64, ts time.Time) struct {
+	TableSchema            string                 `json:"table_schema"`
+	TableName              string                 `json:"table_name"`
+	CommitTimestamp        string                 `json:"commit_timestamp"`
+	CommitLSN              int64                  `json:"commit_lsn"`
+	IdempotencyKey         string                 `json:"idempotency_key"`
+	TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+	Sink                   struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"sink"`
+} {
+	return struct {
+		TableSchema            string                 `json:"table_schema"`
+		TableName              string                 `json:"table_name"`
+		CommitTimestamp        string                 `json:"commit_timestamp"`
+		CommitLSN              int64                  `json:"commit_lsn"`
+		IdempotencyKey         string                 `json:"idempotency_key"`
+		TransactionAnnotations map[string]interface{} `json:"transaction_annotations,omitempty"`
+		Sink                   struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sink"`
+	}{
+		TableSchema:     "public",
+		TableName:       tableName,
+		CommitTimestamp: ts.Format(time.RFC3339Nano),
+		CommitLSN:       commitLSN,
+		IdempotencyKey:  uuid.New().String(),
+		Sink: struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}{ID: "test-sink-id", Name: "test-sequin-sink"},
+	}
 }
 
 // TestRunIntegrationSuite is the entry point for running the suite.
