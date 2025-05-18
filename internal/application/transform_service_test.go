@@ -1,4 +1,4 @@
-package application
+package application_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
+	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/application"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
 )
 
@@ -29,7 +30,7 @@ var (
 		"message_id":   messageID,
 		"text":         "Hello world",
 		"company_id":   companyID,
-		"message_date": "2025-05-17T00:00:00.000000+07:00",
+		"message_date": "2025-05-17",
 	}
 
 	validCDCEventMessages = domain.CDCEventData{
@@ -379,7 +380,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				tt.setupMocks(mockLoggerInstance, mockMetricsInstance)
 			}
 
-			svc := NewTransformService(mockLoggerInstance, mockMetricsInstance)
+			svc := application.NewTransformService(mockLoggerInstance, mockMetricsInstance)
 			ctx := context.Background()
 
 			enrichedPayload, targetSubjectOut, finalPayloadBytes, err := svc.TransformAndEnrich(ctx, &tt.cdcEvent, tt.subject, tt.cdcEvent.Metadata.TableName)

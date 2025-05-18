@@ -1,4 +1,4 @@
-package application
+package application_test
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/adapters/config"
-	// "gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
+	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/application"
 )
 
 // Mocks used by worker_pool_test.go will be the same as consumer_mocks_test.go
@@ -22,7 +22,7 @@ func TestNewWorkerPool_SizingLogic(t *testing.T) {
 		expectedErrorMessage string
 	}{
 		{
-			name:     "Absolute override for pool size",
+			name:     "Absolute override for Pool size",
 			maxProcs: 4,
 			setupMockConfig: func(mockCfg *mockConfigProvider, numCPU int) {
 				mockCfg.On("GetInt", config.KeyWorkers).Return(10).Once()
@@ -127,14 +127,14 @@ func TestNewWorkerPool_SizingLogic(t *testing.T) {
 			mockLog.On("Info", mock.Anything, mock.AnythingOfType("string"), mock.Anything).Maybe()
 
 			numCPU := tt.maxProcs
-			// Patch getMaxProcs to return numCPU for this test
-			orig := getMaxProcs
-			getMaxProcs = func() int { return numCPU }
-			defer func() { getMaxProcs = orig }()
+			// Patch GetMaxProcs to return numCPU for this test
+			orig := application.GetMaxProcs
+			application.GetMaxProcs = func() int { return numCPU }
+			defer func() { application.GetMaxProcs = orig }()
 
 			tt.setupMockConfig(mockCfg, numCPU)
 
-			actualPool, err := NewWorkerPool(mockCfg, mockLog)
+			actualPool, err := application.NewWorkerPool(mockCfg, mockLog)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -146,12 +146,12 @@ func TestNewWorkerPool_SizingLogic(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, actualPool)
 				if actualPool != nil {
-					if actualPool.pool != nil {
+					if actualPool.Pool != nil {
 						expected := tt.expectedSize
-						assert.Equal(t, expected, actualPool.pool.Cap(), "Pool capacity mismatch for test: "+tt.name)
+						assert.Equal(t, expected, actualPool.Pool.Cap(), "Pool capacity mismatch for test: "+tt.name)
 						actualPool.Release()
 					} else {
-						t.Errorf("Expected a non-nil antsPool (actualPool.pool) when no error is returned from NewWorkerPool for test: %s", tt.name)
+						t.Errorf("Expected a non-nil antsPool (actualPool.Pool) when no error is returned from NewWorkerPool for test: %s", tt.name)
 					}
 				}
 			}

@@ -1,4 +1,4 @@
-package application
+package application_test
 
 import (
 	"context"
@@ -6,22 +6,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
-
 	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/adapters/config" // For config keys
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/adapters/logger" // For logger constants if any, and ContextWithEventID
+	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/application"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
-
-	// For zap.Field type, used in mockLogger
-	"go.uber.org/zap"
 )
 
 var testJson = jsoniter.ConfigFastest
 
 // --- Mocks are now in consumer_mocks_test.go ---
 
-// --- Test Cases for processEvent ---
+// --- Test Cases for ProcessEvent ---
 
 func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 	// Mock setup
@@ -35,7 +34,7 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 
 	mockLog.On("With", zap.String("component", "consumer")).Return(mockLog)
 
-	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
+	consumer := application.NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	// Test data for raw message
 	companyID := "testCompany"
@@ -117,15 +116,15 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 	mockMsg.On("Ack").Return(nil)
 
 	// Execute
-	// Prepare context. processEvent itself will add more specific eventID and table name.
-	// No need to put table name or prelim eventID in ctx for processEvent directly,
-	// as processEvent extracts tableName and TransformAndEnrich provides the final eventID for logging.
+	// Prepare context. ProcessEvent itself will add more specific eventID and table name.
+	// No need to put table name or prelim eventID in ctx for ProcessEvent directly,
+	// as ProcessEvent extracts tableName and TransformAndEnrich provides the final eventID for logging.
 	// However, the initial log in HandleCDCEvent uses ctx, so it might have prelim_event_id.
-	// processEvent itself will put tableName into ctx if not present.
+	// ProcessEvent itself will put tableName into ctx if not present.
 	initialCtx := context.WithValue(context.Background(), logger.LogKeyTable, tableName) // Simulating HandleCDCEvent a bit
 	initialCtx = logger.ContextWithEventID(initialCtx, "prelimID")
 
-	consumer.processEvent(initialCtx, mockMsg, originalSubject)
+	consumer.ProcessEvent(initialCtx, mockMsg, originalSubject)
 
 	// Assertions
 	mockTransformer.AssertExpectations(t)
@@ -148,7 +147,7 @@ func TestConsumer_processEvent_DuplicateEvent(t *testing.T) {
 	mockMsg := new(mockCDCEventMessage)
 
 	mockLog.On("With", zap.String("component", "consumer")).Return(mockLog)
-	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
+	consumer := application.NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	tableName := "messages"
 	dbName := "testCompany"
@@ -199,7 +198,7 @@ func TestConsumer_processEvent_DuplicateEvent(t *testing.T) {
 
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, logger.LogKeyTable, tableName)
-	consumer.processEvent(ctx, mockMsg, originalSubject)
+	consumer.ProcessEvent(ctx, mockMsg, originalSubject)
 
 	mockTransformer.AssertExpectations(t)
 	mockDedup.AssertExpectations(t)
@@ -219,7 +218,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 	mockMsg := new(mockCDCEventMessage)
 
 	mockLog.On("With", zap.String("component", "consumer")).Return(mockLog)
-	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
+	consumer := application.NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	companyID := "testCompany"
 	dbName := companyID
@@ -301,7 +300,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, logger.LogKeyTable, tableName)
-	consumer.processEvent(ctx, mockMsg, originalSubject)
+	consumer.ProcessEvent(ctx, mockMsg, originalSubject)
 
 	mockCfg.AssertExpectations(t)
 	mockTransformer.AssertExpectations(t)
@@ -323,7 +322,7 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 	mockMsg := new(mockCDCEventMessage)
 
 	mockLog.On("With", zap.String("component", "consumer")).Return(mockLog)
-	consumer := NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
+	consumer := application.NewConsumer(mockCfg, mockLog, mockDedup, mockPub, mockMetrics, nil, mockTransformer)
 
 	tableName := "messages"
 	dbName := "testCompany"
@@ -376,7 +375,7 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, logger.LogKeyTable, tableName)
 
-	consumer.processEvent(ctx, mockMsg, originalSubject)
+	consumer.ProcessEvent(ctx, mockMsg, originalSubject)
 
 	mockTransformer.AssertExpectations(t)
 	mockMetrics.AssertExpectations(t)
@@ -394,7 +393,7 @@ func TestConsumer_processEvent_TransformDataError(t *testing.T) {
 // - agent_id missing (handled by TransformAndEnrich mock returning error)
 // - chat_id missing for "messages" table (should lead to error from TransformAndEnrich)
 // - TransformAndEnrich itself returns an error
-// - NATS subject parsing errors (for tableName in consumer.go's processEvent before calling transformer)
+// - NATS subject parsing errors (for tableName in consumer.go's ProcessEvent before calling transformer)
 // - Test interaction with metrics for various paths (skipped, duplicate, error types)
 
 // TestExtractPKValue is removed as extractPKValue is now part of transformService and will be tested there.

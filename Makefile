@@ -5,7 +5,7 @@ APP_NAME := daisi-cdc-consumer-service
 CONTAINER_TAG := latest
 CDC_CONSUMER_SERVICE_NAME := cdc-consumer
 
-.PHONY: all build up down stop logs ps test test-coverage lint generate prune clean help
+.PHONY: all build up down stop logs ps test test-coverage bench lint generate prune clean help
 
 all: build
 
@@ -43,6 +43,11 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+bench:
+	@echo "Running Go benchmarks for the application package (verbose)..."
+	@go clean -testcache
+	cd ./internal/application && go test -v -run=^$ -bench=. -benchmem
+
 lint:
 	@echo "Running golangci-lint..."
 	golangci-lint run
@@ -69,6 +74,7 @@ help:
 	@echo "  ps             - Show the status of Docker services."
 	@echo "  test           - Run Go unit and integration tests."
 	@echo "  test-coverage  - Run Go tests and generate an HTML coverage report."
+	@echo "  bench          - Run Go benchmarks for the application package (includes memory stats)."
 	@echo "  lint           - Run golangci-lint (if installed)."
 	@echo "  generate       - Run go generate (e.g., for Wire)."
 	@echo "  prune          - Remove all unused Docker containers, networks, images, and volumes."

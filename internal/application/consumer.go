@@ -55,7 +55,7 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new instance of the CDC event Consumer.
-// It requires all its dependencies (domain ports and worker pool) to be provided.
+// It requires all its dependencies (domain ports and worker Pool) to be provided.
 func NewConsumer(
 	cfg domain.ConfigProvider,
 	log domain.Logger,
@@ -108,8 +108,8 @@ func parseNatsSubject(subject string) domain.ParsedSubjectInfo {
 	return info
 }
 
-// processEvent is the actual processing logic for a single event, intended to be run in a worker goroutine.
-func (c *Consumer) processEvent(ctx context.Context, msg CDCEventMessage, originalSubject string) {
+// ProcessEvent is the actual processing logic for a single event, intended to be run in a worker goroutine.
+func (c *Consumer) ProcessEvent(ctx context.Context, msg CDCEventMessage, originalSubject string) {
 	parsedSubject := parseNatsSubject(originalSubject)
 
 	if !parsedSubject.IsValid {
@@ -225,7 +225,7 @@ func (c *Consumer) processEvent(ctx context.Context, msg CDCEventMessage, origin
 
 // HandleCDCEvent is the primary method called by the NATS ingestion adapter
 // when a new CDC event message is received.
-// It performs initial quick checks and then dispatches the core processing to a worker pool.
+// It performs initial quick checks and then dispatches the core processing to a worker Pool.
 func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) error {
 	// Store original subject because msg might be mutated or its context lost in async worker
 	originalSubject := msg.GetSubject()
@@ -252,9 +252,9 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 	ctx = context.WithValue(ctx, logger.LogKeyTable, parsedSubjectInfo.TableName)
 	// TODO: Consider adding other parsedSubjectInfo parts (DatabaseName, SchemaName, Action) to context if needed for downstream logging or logic
 
-	c.logger.Info(ctx, "Received CDC event, submitting to worker pool", zap.ByteString("raw_data_snippet", msg.GetData()[:min(len(msg.GetData()), 64)])) // Log snippet
+	c.logger.Info(ctx, "Received CDC event, submitting to worker Pool", zap.ByteString("raw_data_snippet", msg.GetData()[:min(len(msg.GetData()), 64)])) // Log snippet
 
-	// Filter based on AllowedTables before submitting to worker pool to save resources
+	// Filter based on AllowedTables before submitting to worker Pool to save resources
 	if _, isAllowed := domain.AllowedTables[parsedSubjectInfo.TableName]; !isAllowed {
 		c.logger.Info(ctx, "Table not allowed, skipping event before worker submission", zap.String("table_name", parsedSubjectInfo.TableName))
 		c.metricsSink.IncEventsTotal(parsedSubjectInfo.TableName, "skipped")
@@ -264,8 +264,8 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 		return nil // Successfully skipped and ACKed.
 	}
 
-	// Submit the core processing to the worker pool
-	// The actual Ack/Nack will be handled within processEvent
+	// Submit the core processing to the worker Pool
+	// The actual Ack/Nack will be handled within ProcessEvent
 	submitErr := c.workerPool.Submit(func() {
 		// Create a new context for the worker goroutine, potentially deriving from the input ctx
 		// This ensures that if the outer context from NATS ingester is cancelled,
@@ -274,16 +274,16 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 		// For now, we pass the context through. If tracing is added, new spans might start here.
 
 		// Pass the original context (which includes requestID and other relevant values)
-		// directly to processEvent. processEvent itself will manage its specific context values like table_name and final event_id.
-		c.processEvent(ctx, msg, originalSubject)
+		// directly to ProcessEvent. ProcessEvent itself will manage its specific context values like table_name and final event_id.
+		c.ProcessEvent(ctx, msg, originalSubject)
 	})
 
 	if submitErr != nil {
-		c.logger.Error(ctx, "Failed to submit CDC event to worker pool", zap.Error(submitErr))
+		c.logger.Error(ctx, "Failed to submit CDC event to worker Pool", zap.Error(submitErr))
 		c.metricsSink.IncEventsTotal(parsedSubjectInfo.TableName, "worker_submit_error")
-		// Check if the error is due to pool being closed or other non-retryable submission issues.
+		// Check if the error is due to Pool being closed or other non-retryable submission issues.
 		if errors.Is(submitErr, domain.ErrTaskSubmissionToPool) {
-			// If ErrTaskSubmissionToPool implies a non-retryable state (like pool closed for good),
+			// If ErrTaskSubmissionToPool implies a non-retryable state (like Pool closed for good),
 			// then Ack might be appropriate. Otherwise, Nack.
 			// For now, assume task submission errors are serious and message might be lost if Acked.
 			// Let's Nack to indicate a system-level issue in processing the message submission.
@@ -299,7 +299,7 @@ func (c *Consumer) HandleCDCEvent(ctx context.Context, msg CDCEventMessage) erro
 		return submitErr // Return the original or wrapped error from Submit.
 	}
 
-	// If submission is successful, the responsibility of Ack/Nack is now with processEvent.
+	// If submission is successful, the responsibility of Ack/Nack is now with ProcessEvent.
 	// HandleCDCEvent returns nil, indicating it has accepted the message for processing.
 	return nil
 }
