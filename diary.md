@@ -251,3 +251,24 @@
     *   The command `make bench` executes `go test -bench . -benchmem -run=^$ ./internal/application/...`, facilitating easy execution of benchmarks with memory statistics for the application package.
 *   **Task Master Update:**
     *   Marked main Task 12 ("Benchmark Harness and Performance Validation") as "done". Subtasks 12.1 through 12.4, covering the implementation of the benchmark harness, are complete. Subtask 12.5, which involves running and analyzing these benchmarks, is now an execution step for the user.
+
+## 2025-05-18T11:45:32+07:00
+
+- Completed Task 11.1: "Set Up Integration Test Project Structure".
+    - Created the `integration_test` directory at the project root.
+    - Added `integration_test/main_test.go` with `TestMain` for package-level setup/teardown.
+    - Added `integration_test/example_integration_test.go` with a basic placeholder test using `testify/assert`.
+    - Verified the setup by running `go test -v .` within the `integration_test` directory; all tests passed.
+    - Updated subtask 11.1 in Task Master with the implementation details and marked it as 'done'.
+- Ready to proceed with subtask 11.2.
+
+## 2025-05-18T12:11:06+07:00
+
+- Completed Task 11.2: "Configure and Launch NATS JetStream and Redis Containers".
+    - Refactored integration tests to use `testify/suite` (`IntegrationTestSuite` in `integration_test/main_integration_suite_test.go`).
+    - `SetupSuite` now starts NATS (JetStream enabled) and Redis containers using helpers from `integration_test/docker_helpers_test.go`.
+    - `TearDownSuite` ensures containers are terminated.
+    - Corrected NATS container wait strategy in `docker_helpers_test.go` to use `wait.ForLog("Server is ready")`.
+    - Successfully ran `go test -v -count=1 -timeout 6m .` in the `integration_test` directory. All tests in `IntegrationTestSuite` passed, confirming containers start, are accessible, and are torn down correctly.
+    - Updated subtask 11.2 in Task Master with details and marked it as 'done'.
+- Ready to proceed with subtask 11.3.
