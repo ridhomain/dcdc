@@ -1,0 +1,96 @@
+---
+databases:
+  - name: message_service_loadtest
+    port: 5432
+    ssl: false
+    ipv6: false
+    hostname: postgres
+    password: '********'
+    username: postgres
+    pool_size: 10
+    database: message_service_loadtest
+    use_local_tunnel: false
+    slot_name: sequin_slot
+    publication_name: sequin_pub
+  - name: sequin-playground
+    port: 5432
+    ssl: false
+    ipv6: false
+    hostname: sequin_postgres
+    password: '********'
+    username: postgres
+    pool_size: 10
+    database: sequin_playground
+    use_local_tunnel: false
+    slot_name: sequin_slot
+    publication_name: sequin_pub
+sinks:
+  - name: messages_sink
+    status: active
+    table: daisi_CompanyAAA01.messages
+    filters: []
+    transform: none
+    destination:
+      port: 4222
+      type: nats
+      host: daisi-cdc-consumer-service-nats-1
+      tls: false
+    actions:
+      - insert
+      - update
+      - delete
+    batch_size: 1
+    database: message_service_loadtest
+    timestamp_format: iso8601
+    max_retry_count:
+    load_shedding_policy: pause_on_full
+    active_backfill:
+    group_column_names:
+      - id
+      - message_date
+  - name: agents_sink
+    status: active
+    table: daisi_CompanyAAA01.agents
+    filters: []
+    transform: none
+    destination:
+      port: 4222
+      type: nats
+      host: daisi-cdc-consumer-service-nats-1
+      tls: false
+    actions:
+      - insert
+      - update
+      - delete
+    batch_size: 1
+    database: message_service_loadtest
+    timestamp_format: iso8601
+    max_retry_count:
+    load_shedding_policy: pause_on_full
+    active_backfill:
+    group_column_names:
+      - id
+      - agent_id
+  - name: chats_sink
+    status: active
+    table: daisi_CompanyAAA01.chats
+    filters: []
+    transform: none
+    destination:
+      port: 4222
+      type: nats
+      host: daisi-cdc-consumer-service-nats-1
+      tls: false
+    actions:
+      - insert
+      - update
+      - delete
+    batch_size: 1
+    database: message_service_loadtest
+    timestamp_format: iso8601
+    max_retry_count:
+    load_shedding_policy: pause_on_full
+    active_backfill:
+    group_column_names:
+      - id
+

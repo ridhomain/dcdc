@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  cdc-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: daisi-cdc-consumer-service
+    ports:
+      - "8080:8080" # Metrics port
+    environment:
+      # These override config.yaml if DAISI_CDC_ prefix is used by Viper's AutomaticEnv
+      # Or, if viper is not loading from ENV with prefix, these need to match config.yaml keys
+      DAISI_CDC_NATS_URL: "nats://nats:4222"
+      DAISI_CDC_REDIS_ADDR: "redis://redis:6379"
+      DAISI_CDC_LOG_LEVEL: "debug" # Example: set to debug for local development
+      # Add other DAISI_CDC_ prefixed environment variables as needed
+    depends_on:
+      - nats
+      - redis
+    # env_file:
+    #   - .env # uncomment if you have an .env file with DAISI_CDC_ prefixed vars
+
+  nats:
+    image: nats:2.11-alpine
+    command: "--name local-nats-server --http_port 8222 --jetstream --store_dir /data"
+    ports:
+      - "4222:4222" # Client port
+      - "8222:8222" # Monitoring port
+    volumes:
+      - ./.data/nats:/data
+    networks:
+      - default
+      - sequin_default
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine # Using a specific alpine version
+    container_name: redis-server
+    ports:
+      - "63791:6379"
+    volumes:
+      - ./.data/redis:/data
+
+networks:
+  default:
+    driver: bridge 
+  sequin_default:
+    external: true 
