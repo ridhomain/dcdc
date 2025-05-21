@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 	"gitlab.com/timkado/api/daisi-cdc-consumer-service/internal/domain"
@@ -98,6 +99,8 @@ func (ts *transformService) extractPKValue(typedData interface{}, tableName stri
 
 // TransformAndEnrich implements the EventTransformer interface.
 func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData *domain.CDCEventData, originalSubject string, tableNameFromSubject string) (*domain.EnrichedEventPayload, string, []byte, error) {
+	eventTime := time.Now().UnixMilli()
+
 	// Use the table name from Sequin's metadata as the authoritative source.
 	authoritativeTableName := cdcEventData.Metadata.TableName
 	if authoritativeTableName == "" {
@@ -187,6 +190,7 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	// Create EnrichedEventPayload
 	enrichedPayload := &domain.EnrichedEventPayload{
 		EventID:   eventIDStr,
+		EventTime: eventTime,
 		CompanyID: authoritativeCompanyID,
 		AgentID:   agentID,
 		ChatID:    chatID,
