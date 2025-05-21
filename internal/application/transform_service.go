@@ -99,7 +99,7 @@ func (ts *transformService) extractPKValue(typedData interface{}, tableName stri
 
 // TransformAndEnrich implements the EventTransformer interface.
 func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData *domain.CDCEventData, originalSubject string, tableNameFromSubject string) (*domain.EnrichedEventPayload, string, []byte, error) {
-	eventTime := time.Now().UnixMilli()
+	eventTime := time.Now().Format(time.RFC3339)
 
 	// Use the table name from Sequin's metadata as the authoritative source.
 	authoritativeTableName := cdcEventData.Metadata.TableName

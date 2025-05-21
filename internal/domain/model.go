@@ -185,7 +185,7 @@ func (md *MessageData) GetKnownJSONFields() map[string]struct{} {
 // metadata and the core data from the original table row.
 type EnrichedEventPayload struct {
 	EventID   string `json:"event_id"`             // Derived unique event ID (e.g., LSN:Table:PKs)
-	EventTime int64  `json:"event_time"`           // Time the event was processed by this service in UNIX milisecond
+	EventTime string `json:"event_time"`           // Time the event was processed by this service in RFC3339
 	CompanyID string `json:"company_id"`           // Company ID associated with the event
 	AgentID   string `json:"agent_id,omitempty"`   // Agent ID associated with the event
 	MessageID string `json:"message_id,omitempty"` // Message ID associated with the event
