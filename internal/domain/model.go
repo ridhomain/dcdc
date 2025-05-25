@@ -151,12 +151,14 @@ type MessageData struct {
 	ChatID           string      `json:"chat_id,omitempty"`
 	AgentID          string      `json:"agent_id,omitempty"`
 	CompanyID        string      `json:"company_id,omitempty"`
-	From             string      `json:"from,omitempty"`
-	To               string      `json:"to,omitempty"`
+	From             string      `json:"from_user,omitempty"`
+	To               string      `json:"to_user,omitempty"`
 	Jid              string      `json:"jid,omitempty"`
 	Flow             string      `json:"flow,omitempty"`
-	MessageObj       interface{} `json:"message_obj,omitempty"` // Was datatypes.JSON
-	Key              interface{} `json:"key,omitempty"`         // Was datatypes.JSON
+	Type             string      `json:"type,omitempty"`
+	MessageObj       interface{} `json:"message_obj,omitempty"`        // Was datatypes.JSON
+	EditedMessageObj interface{} `json:"edited_message_obj,omitempty"` // Was datatypes.JSON
+	Key              interface{} `json:"key,omitempty"`                // Was datatypes.JSON
 	Status           string      `json:"status,omitempty"`
 	IsDeleted        bool        `json:"is_deleted"`
 	MessageTimestamp int64       `json:"message_timestamp,omitempty"`
@@ -183,6 +185,7 @@ func (md *MessageData) GetKnownJSONFields() map[string]struct{} {
 // metadata and the core data from the original table row.
 type EnrichedEventPayload struct {
 	EventID   string `json:"event_id"`             // Derived unique event ID (e.g., LSN:Table:PKs)
+	EventTime string `json:"event_time"`           // Time the event was processed by this service in RFC3339
 	CompanyID string `json:"company_id"`           // Company ID associated with the event
 	AgentID   string `json:"agent_id,omitempty"`   // Agent ID associated with the event
 	MessageID string `json:"message_id,omitempty"` // Message ID associated with the event

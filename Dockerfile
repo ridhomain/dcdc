@@ -29,6 +29,9 @@ WORKDIR /app
 # Create a non-root user and group
 RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 
+# Install wget for healthchecks
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
 # Copy the built binary from the builder stage
 COPY --from=builder /app/main /app/main
 
