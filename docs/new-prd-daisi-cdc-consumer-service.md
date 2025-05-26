@@ -483,7 +483,7 @@ The consumer **does not** write to Postgres, but understanding message semantics
 | Var | Default | Description |
 |-----|---------|-------------|
 | `NATS_URL` | `nats://nats:4222` | JetStream broker. |
-| `REDIS_ADDR` | `redis:6379` | Dedup cache. |
+| `REDIS_ADDRESS` | `redis:6379` | Dedup cache. |
 | `DEDUP_TTL` | `300s` | Redis key expiry. |
 | `JS_ACK_WAIT` | `30s` | Ack wait duration. |
 | `JS_MAX_DELIVER` | `3` | Max redeliveries. |

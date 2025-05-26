@@ -18,7 +18,7 @@ const (
 	// KeyNatsURL is the config key for the NATS server URL.
 	KeyNatsURL = "nats_url"
 	// KeyRedisAddr is the config key for the Redis server address.
-	KeyRedisAddr = "redis_addr"
+	KeyRedisAddr = "redis_address"
 	// KeyDedupTTL is the config key for the deduplication key TTL in Redis.
 	KeyDedupTTL = "dedup_ttl"
 	// KeyJSCdcStreamName is the config key for the NATS JetStream CDC stream name to subscribe to.

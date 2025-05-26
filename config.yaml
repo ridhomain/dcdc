@@ -1,5 +1,5 @@
 nats_url: "nats://localhost:4222"
-redis_addr: "redis://localhost:6379"
+redis_address: "redis://localhost:6379"
 dedup_ttl: "300s" # 5 minutes
 js_cdc_stream_name: "cdc_events_stream"
 js_wa_stream_name: "wa_stream"

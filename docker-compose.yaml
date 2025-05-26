@@ -12,7 +12,7 @@ services:
       # These override config.yaml if DAISI_CDC_ prefix is used by Viper's AutomaticEnv
       # Or, if viper is not loading from ENV with prefix, these need to match config.yaml keys
       DAISI_CDC_NATS_URL: "nats://nats:4222"
-      DAISI_CDC_REDIS_ADDR: "redis://redis:6379"
+      DAISI_CDC_REDIS_ADDRESS: "redis://redis:6379"
       DAISI_CDC_LOG_LEVEL: "debug" # Example: set to debug for local development
       # Add other DAISI_CDC_ prefixed environment variables as needed
     depends_on:
