@@ -1,0 +1,7 @@
+variables:
+  SERVICE_NAME: daisi-cdc-consumer-service
+
+include:
+  - project: "timkado/infrastructure/microservices-ci-cd"
+    ref: dev
+    file: ".gitlab-ci.yml"
