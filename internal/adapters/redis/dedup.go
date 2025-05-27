@@ -39,7 +39,13 @@ func NewDedupStore(
 		return nil, fmt.Errorf("redis address not configured (key: %s)", config.KeyRedisAddr)
 	}
 
-	opts, err := redis.ParseURL(redisAddr)
+	rawAddr := strings.TrimSpace(redisAddr)
+
+	if !strings.HasPrefix(rawAddr, "redis://") {
+		rawAddr = "redis://" + rawAddr
+	}
+
+	opts, err := redis.ParseURL(rawAddr)
 	if err != nil {
 		logger.Error(context.Background(), "Failed to parse Redis URL", zap.Error(err), zap.String("redis_url", redisAddr))
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
