@@ -68,7 +68,7 @@ func NewViperConfigProvider() domain.ConfigProvider {
 
 	// Set environment variable prefix and automatic loading.
 	// This allows DAISI_CDC_NATS_URL to override nats_url from a config file.
-	v.SetEnvPrefix(envPrefix)
+	// v.SetEnvPrefix(envPrefix)
 	v.AutomaticEnv()
 	// Useful if keys have dots or dashes, e.g., "database.url" -> DAISI_CDC_DATABASE_URL
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
