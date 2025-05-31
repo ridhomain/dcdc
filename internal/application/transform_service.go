@@ -220,13 +220,9 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	case "chats":
 		targetSubject = fmt.Sprintf("wa.%s.%s.chats", authoritativeCompanyID, agentID)
 	case "agents":
-<<<<<<< Updated upstream
-		targetSubject = fmt.Sprintf("wa.%s.%s.agents", authoritativeCompanyID, agentID)
-=======
 		targetSubject = fmt.Sprintf("websocket.%s.%s.agents", authoritativeCompanyID, agentID)
 	case "contacts":
 		targetSubject = fmt.Sprintf("websocket.%s.%s.contacts", authoritativeCompanyID, agentID)
->>>>>>> Stashed changes
 	default:
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Should have been caught earlier
 	}
