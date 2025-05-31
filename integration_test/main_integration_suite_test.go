@@ -458,8 +458,8 @@ func (s *IntegrationTestSuite) TestHappyPath_SingleMessage_MessagesTable() {
 		IsDeleted:        false,
 		MessageTimestamp: now.UnixMilli(),
 		MessageDate:      domain.CustomDate{Time: now},
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		// CreatedAt:        now,
+		// UpdatedAt:        now,
 	}
 
 	recordData := make(map[string]interface{})
@@ -666,8 +666,8 @@ func (s *IntegrationTestSuite) TestDuplicateMessageHandling() {
 		IsDeleted:        false,
 		MessageTimestamp: now.UnixMilli(),
 		MessageDate:      domain.CustomDate{Time: now},
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		// CreatedAt:        now,
+		// UpdatedAt:        now,
 	}
 
 	recordData := make(map[string]interface{})

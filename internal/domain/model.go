@@ -41,6 +41,7 @@ var AllowedTables = map[string]struct{}{
 	"messages": {},
 	"chats":    {},
 	"agents":   {},
+	"contacts": {},
 }
 
 // CDCEventData represents the relevant data from a Sequin Change Data Capture event.
@@ -85,17 +86,17 @@ func getJSONFieldName(field reflect.StructField) string {
 // Fields are based on the provided Agent struct, focusing on those relevant to the consumer.
 // We will unmarshal cdcEventData.Record into this.
 type AgentData struct {
-	ID           int64       `json:"id"`
-	AgentID      string      `json:"agent_id"`
-	CompanyID    string      `json:"company_id,omitempty"`
-	QRCode       string      `json:"qr_code,omitempty"`
-	Status       string      `json:"status,omitempty"`
-	AgentName    string      `json:"agent_name,omitempty"`
-	HostName     string      `json:"host_name,omitempty"`
-	Version      string      `json:"version,omitempty"`
-	CreatedAt    time.Time   `json:"created_at,omitempty"`
-	UpdatedAt    time.Time   `json:"updated_at,omitempty"`
-	LastMetadata interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
+	ID        int64     `json:"id"`
+	AgentID   string    `json:"agent_id"`
+	CompanyID string    `json:"company_id,omitempty"`
+	QRCode    string    `json:"qr_code,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	AgentName string    `json:"agent_name,omitempty"`
+	HostName  string    `json:"host_name,omitempty"`
+	Version   string    `json:"version,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// LastMetadata interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
 }
 
 // GetKnownJSONFields returns a set of JSON field names known to AgentData.
@@ -125,11 +126,11 @@ type ChatData struct {
 	AssignedTo            string      `json:"assigned_to,omitempty"`
 	LastMessageObj        interface{} `json:"last_message,omitempty"` // Was datatypes.JSON
 	ConversationTimestamp int64       `json:"conversation_timestamp,omitempty"`
-	NotSpam               bool        `json:"not_spam,omitempty"`
-	PhoneNumber           string      `json:"phone_number,omitempty"`
-	LastMetadata          interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
-	CreatedAt             time.Time   `json:"created_at,omitempty"`
-	UpdatedAt             time.Time   `json:"updated_at,omitempty"`
+	// NotSpam               bool        `json:"not_spam,omitempty"`
+	PhoneNumber string `json:"phone_number,omitempty"`
+	// LastMetadata          interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
+	// CreatedAt             time.Time   `json:"created_at,omitempty"`
+	// UpdatedAt             time.Time   `json:"updated_at,omitempty"`
 }
 
 // GetKnownJSONFields returns a set of JSON field names known to ChatData.
@@ -163,15 +164,43 @@ type MessageData struct {
 	IsDeleted        bool        `json:"is_deleted"`
 	MessageTimestamp int64       `json:"message_timestamp,omitempty"`
 	MessageDate      CustomDate  `json:"message_date"` // Assuming it's not omitempty since not null
-	CreatedAt        time.Time   `json:"created_at,omitempty"`
-	UpdatedAt        time.Time   `json:"updated_at,omitempty"`
-	LastMetadata     interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
+	// CreatedAt        time.Time   `json:"created_at,omitempty"`
+	// UpdatedAt        time.Time   `json:"updated_at,omitempty"`
+	// LastMetadata     interface{} `json:"last_metadata,omitempty"` // Was datatypes.JSON
 }
 
 // GetKnownJSONFields returns a set of JSON field names known to MessageData.
 func (md *MessageData) GetKnownJSONFields() map[string]struct{} {
 	known := make(map[string]struct{})
 	t := reflect.TypeOf(*md)
+	for i := 0; i < t.NumField(); i++ {
+		if jsonName := getJSONFieldName(t.Field(i)); jsonName != "" {
+			known[jsonName] = struct{}{}
+		}
+	}
+	return known
+}
+
+// ContactData represents the fields extracted from a 'contacts' table CDC event record.
+// Based on the architecture document schema for contacts table.
+type ContactData struct {
+	ID          string `json:"id"`
+	PhoneNumber string `json:"phone_number"`
+	CompanyID   string `json:"company_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	CustomName  string `json:"custom_name,omitempty"` // Improved from 'name'
+	AssignedTo  string `json:"assigned_to,omitempty"`
+	// Status         string      `json:"status,omitempty"`           // ACTIVE, DISABLED
+	// FirstMessageID string      `json:"first_message_id,omitempty"` // New: tracking first interaction
+	// LastMetadata   interface{} `json:"last_metadata,omitempty"`    // Flexible metadata storage
+	// CreatedAt      time.Time   `json:"created_at,omitempty"`
+	// UpdatedAt      time.Time   `json:"updated_at,omitempty"`
+}
+
+// GetKnownJSONFields returns a set of JSON field names known to ContactData.
+func (cd *ContactData) GetKnownJSONFields() map[string]struct{} {
+	known := make(map[string]struct{})
+	t := reflect.TypeOf(*cd)
 	for i := 0; i < t.NumField(); i++ {
 		if jsonName := getJSONFieldName(t.Field(i)); jsonName != "" {
 			known[jsonName] = struct{}{}
