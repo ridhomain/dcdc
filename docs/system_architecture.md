@@ -113,7 +113,7 @@ graph TD
         *   Identifies any fields present in the raw record but not defined in the typed struct ("unhandled fields") and logs them.
         *   Constructs a unique `EventID` (format: `LSN:TableName:PK_Value`).
         *   Extracts key identifiers (`company_id`, `agent_id`, `chat_id`, `message_id`) to build `domain.EnrichedEventPayload`.
-        *   Determines the target NATS subject for publishing (e.g., `wa.<company_id>.<agent_id>.messages.<chat_id>`).
+        *   Determines the target NATS subject for publishing (e.g., `websocket.<company_id>.<agent_id>.messages.<chat_id>`).
         *   Marshals the `EnrichedEventPayload` into JSON bytes for publishing.
 
 *   **`DedupStore` (`adapters/redis/dedup.go`):**
@@ -159,7 +159,7 @@ The primary data flow through the service is as follows:
     *   **Deduplication:** `DedupStore.IsDuplicate()` is called with the `EventID`.
         *   If Redis indicates the `EventID` has been seen (within the TTL), the event is considered a duplicate and processing stops. The original NATS message is ACKed.
     *   **Publishing:** If not a duplicate:
-        *   `JetStreamPublisher.Publish()` sends the marshaled `EnrichedEventPayload` to the target NATS JetStream (e.g., `wa_stream` on a subject like `wa.<company_id>.<agent_id>.messages.<chat_id>`).
+        *   `JetStreamPublisher.Publish()` sends the marshaled `EnrichedEventPayload` to the target NATS JetStream (e.g., `wa_stream` on a subject like `websocket.<company_id>.<agent_id>.messages.<chat_id>`).
     *   **Acknowledgement:**
         *   If all steps are successful (or it's a recognized duplicate/skipped table), the original NATS message received by `JetStreamIngester` is ACKed.
         *   If errors occur during critical processing steps (e.g., deduplication failure, publish failure), the message is NACKed to allow NATS to redeliver it.

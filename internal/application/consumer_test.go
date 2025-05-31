@@ -87,7 +87,7 @@ func TestConsumer_processEvent_HappyPath_Messages(t *testing.T) {
 
 	// Data expected to be returned by the transformer
 	expectedTransformedEventIDStr := fmt.Sprintf("%d:%s:%s", lsn, tableName, messageID)
-	expectedTargetSubject := fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID)
+	expectedTargetSubject := fmt.Sprintf("websocket.%s.%s.messages.%s", companyID, agentID, chatID)
 	expectedEnrichedPayload := &domain.EnrichedEventPayload{
 		EventID: expectedTransformedEventIDStr,
 		AgentID: agentID,
@@ -268,7 +268,7 @@ func TestConsumer_processEvent_PublishError(t *testing.T) {
 	mockMsg.On("GetData").Return(rawDataBytes)
 
 	expectedTransformedEventIDStr := fmt.Sprintf("%d:%s:%s", lsn, tableName, messageID)
-	expectedTargetSubject := fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID)
+	expectedTargetSubject := fmt.Sprintf("websocket.%s.%s.messages.%s", companyID, agentID, chatID)
 	enrichedPayloadFromTransformer := &domain.EnrichedEventPayload{EventID: expectedTransformedEventIDStr, AgentID: agentID, ChatID: chatID, RowData: rawCDCDataRecord}
 	expectedPayloadBytes, _ := testJson.Marshal(enrichedPayloadFromTransformer)
 

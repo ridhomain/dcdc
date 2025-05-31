@@ -274,7 +274,7 @@ func BenchmarkConsumerProcessEvent(b *testing.B) {
 		}
 		// For small payload, chat_id might not be present directly for subject construction if not a message, adjust if necessary.
 		// Assuming 'messages' table for all for simplicity here, thus expecting chat_id.
-		targetSubject := fmt.Sprintf("wa.%s.%s.messages.%s",
+		targetSubject := fmt.Sprintf("websocket.%s.%s.messages.%s",
 			enrichedPayload.CompanyID,
 			enrichedPayload.AgentID,
 			enrichedPayload.ChatID,

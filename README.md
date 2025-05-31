@@ -7,7 +7,7 @@
 1.  **Ingests** Sequin CDC messages published to JetStream subjects `cdc.<company>.<table>`.
 2.  **Processes *only* the tables `messages`, `chats`, and `agents`** – all other tables are acknowledged and ignored.
 3.  **Normalises & enriches** the payload with `agent_id`, `chat_id`, and related metadata.
-4.  **Publishes** compact JSON events to subjects consumed by `daisi-ws-service`, e.g. `wa.<company>.<agent>.messages.<chat_id>`.
+4.  **Publishes** compact JSON events to subjects consumed by `daisi-ws-service`, e.g. `websocket.<company>.<agent>.messages.<chat_id>`.
 
 The pipeline is single-deployment, horizontally scalable, and targets **≤ 200 ms P95** end-to-end latency (Sequin → Browser). It is designed to be configurable via a `config.yaml` file and environment variables, leveraging dependency injection using Google Wire for managing its components.
 
@@ -17,7 +17,7 @@ The pipeline is single-deployment, horizontally scalable, and targets **≤ 200 
 | --- | ------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | F-1 | **Schema-agnostic ingestion**         | Consume every tenant schema without redeploy.          | Durable **push** consumer on `cdc.*.*` (stream `cdc_events_stream`) with queue group `cdc_consumers`.     |
 | F-2 | **Table filter**                      | Process only `messages`, `chats`, and `agents` tables. | If `table ∉ {messages,chats,agents}` → `Ack()` immediately, skip transform and publish.                   |
-| F-3 | **Transform & subject mapping**       | Build subject `wa.<C>.<A>.<logical>[.<chat_id>]`.      | Extract company from subject, read `agent_id` & `chat_id` from row image, map logical stream.             |
+| F-3 | **Transform & subject mapping**       | Build subject `websocket.<C>.<A>.<logical>[.<chat_id>]`.      | Extract company from subject, read `agent_id` & `chat_id` from row image, map logical stream.             |
 | F-4 | **Idempotent publish (exactly-once)** | Prevent duplicates even on redelivery.                 | `event_id = LSN:table:PK`; `SETNX dedup:{event_id} "" EX 300` in Redis before `PublishMsgSync`.           |
 | F-5 | **Back-pressure & retry**             | Preserve order and survive broker hiccups.             | On publish error → **do not Ack**. JetStream redelivers after `AckWait` (30 s) with max redeliveries = 3. |
 | F-6 | **Observability**                     | Provide SLO dashboards and structured logs.            | Prometheus counters / histograms, Zap JSON logs, `/metrics` endpoint.                                     |
@@ -174,14 +174,14 @@ The service publishes messages with the following JSON structure, derived from t
 The service publishes enriched events to a NATS JetStream named **`wa_stream`**.
 
 *   **For `messages` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.messages.<chat_id>`
-    *   Example: `wa.company_xyz.agent_123.messages.chat_abc`
+    *   Pattern: `websocket.<company_id>.<agent_id>.messages.<chat_id>`
+    *   Example: `websocket.company_xyz.agent_123.messages.chat_abc`
 *   **For `chats` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.chats`
-    *   Example: `wa.company_xyz.agent_123.chats`
+    *   Pattern: `websocket.<company_id>.<agent_id>.chats`
+    *   Example: `websocket.company_xyz.agent_123.chats`
 *   **For `agents` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.agents`
-    *   Example: `wa.company_xyz.agent_123.agents`
+    *   Pattern: `websocket.<company_id>.<agent_id>.agents`
+    *   Example: `websocket.company_xyz.agent_123.agents`
 
 *(For more details, see `docs/schemas.md`)*
 

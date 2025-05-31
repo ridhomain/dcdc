@@ -23,8 +23,8 @@ const (
 	KeyDedupTTL = "dedup_ttl"
 	// KeyJSCdcStreamName is the config key for the NATS JetStream CDC stream name to subscribe to.
 	KeyJSCdcStreamName = "js_cdc_stream_name"
-	// KeyJSWaStreamName is the config key for the NATS JetStream stream name to publish wa events to.
-	KeyJSWaStreamName = "js_wa_stream_name"
+	// KeyJSWebsocketStreamName is the config key for the NATS JetStream stream name to publish wa events to.
+	KeyJSWebsocketStreamName = "js_websocket_stream_name"
 	// KeyJSCdcConsumerGroup is the config key for the NATS JetStream CDC consumer group name.
 	KeyJSCdcConsumerGroup = "js_cdc_consumer_group"
 	// KeyJSAckWait is the config key for NATS JetStream AckWait duration.
@@ -46,8 +46,8 @@ const (
 	KeyMetricsPort = "metrics_port"
 	// KeyJSCdcStreamSubjects is the config key for the NATS JetStream CDC stream subjects.
 	KeyJSCdcStreamSubjects = "js_cdc_stream_subjects"
-	// KeyJSWaStreamSubjects is the config key for the NATS JetStream subjects for the wa_stream.
-	KeyJSWaStreamSubjects = "js_wa_stream_subjects"
+	// KeyJSWebsocketStreamSubjects is the config key for the NATS JetStream subjects for the wa_stream.
+	KeyJSWebsocketStreamSubjects = "js_websocket_stream_subjects"
 	// KeyPanicGuardFailureThresholdDuration is the config key for the duration after which consecutive failures trigger a panic.
 	KeyPanicGuardFailureThresholdDuration = "panic_guard_failure_threshold_duration"
 )
@@ -88,7 +88,7 @@ func NewViperConfigProvider() domain.ConfigProvider {
 	v.SetDefault(KeyRedisAddr, "redis://localhost:6379") // Assumes Redis is running locally without auth.
 	v.SetDefault(KeyDedupTTL, 300*time.Second)           // 5 minutes, as per PRD.
 	v.SetDefault(KeyJSCdcStreamName, "cdc_events_stream")
-	v.SetDefault(KeyJSWaStreamName, "wa_stream")
+	v.SetDefault(KeyJSWebsocketStreamName, "wa_stream")
 	v.SetDefault(KeyJSCdcConsumerGroup, "cdc_consumers")
 	v.SetDefault(KeyJSAckWait, 30*time.Second) // As per PRD.
 	v.SetDefault(KeyJSMaxDeliver, 3)           // As per PRD.
@@ -105,7 +105,7 @@ func NewViperConfigProvider() domain.ConfigProvider {
 	// So, "sequin.changes.*.*.*.*" allows us to capture all such messages.
 	// The actual stream name (e.g., cdc_events_stream) is a separate NATS concept and remains configurable
 	// via KeyJSCdcStreamName. The subjects defined here are bound to that stream by NATS JetStream configuration.
-	v.SetDefault(KeyJSWaStreamSubjects, "wa.>")                         // Default subjects for the WA stream.
+	v.SetDefault(KeyJSWebsocketStreamSubjects, "websocket.>")           // Default subjects for the WA stream.
 	v.SetDefault(KeyPanicGuardFailureThresholdDuration, 15*time.Minute) // Default 15 minutes for panic guard
 
 	// Attempt to read the config file.
