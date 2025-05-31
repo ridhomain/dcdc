@@ -13,7 +13,7 @@
 2. **Processes *only* the tables `messages`, `chats`, and `agents`** – all other tables are acknowledged and ignored.
 3. **Normalises & enriches** the payload with `agent_id`, `chat_id`, and related metadata.
 4. **Publishes** compact JSON events to subjects consumed by `daisi-ws-service`, e.g.
-   `wa.<company>.<agent>.messages.<chat_id>`.
+   `websocket.<company>.<agent>.messages.<chat_id>`.
 
 The pipeline is single-deployment, horizontally scalable, and targets **≤ 200 ms P95** end-to-end latency (Sequin → Browser).
 
@@ -25,7 +25,7 @@ The pipeline is single-deployment, horizontally scalable, and targets **≤ 200 
 | --- | ------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | F-1 | **Schema-agnostic ingestion**         | Consume every tenant schema without redeploy.          | Durable **push** consumer on `cdc.*.*` (stream `cdc_events_stream`) with queue group `cdc_consumers`.     |
 | F-2 | **Table filter**                      | Process only `messages`, `chats`, and `agents` tables. | If `table ∉ {messages,chats,agents}` → `Ack()` immediately, skip transform and publish.                   |
-| F-3 | **Transform & subject mapping**       | Build subject `wa.<C>.<A>.<logical>[.<chat_id>]`.      | Extract company from subject, read `agent_id` & `chat_id` from row image, map logical stream.             |
+| F-3 | **Transform & subject mapping**       | Build subject `websocket.<C>.<A>.<logical>[.<chat_id>]`.      | Extract company from subject, read `agent_id` & `chat_id` from row image, map logical stream.             |
 | F-4 | **Idempotent publish (exactly-once)** | Prevent duplicates even on redelivery.                 | `event_id = LSN:table:PK`; `SETNX dedup:{event_id} "" EX 300` in Redis before `PublishMsgSync`.           |
 | F-5 | **Back-pressure & retry**             | Preserve order and survive broker hiccups.             | On publish error → **do not Ack**. JetStream redelivers after `AckWait` (30 s) with max redeliveries = 3. |
 | F-6 | **Observability**                     | Provide SLO dashboards and structured logs.            | Prometheus counters / histograms, Zap JSON logs, `/metrics` endpoint.                                     |
@@ -37,9 +37,9 @@ The pipeline is single-deployment, horizontally scalable, and targets **≤ 200 
 
 | Logical stream | Published subject                         | Notes                                                    |
 | -------------- | ----------------------------------------- | -------------------------------------------------------- |
-| **Chat list**  | `wa.<company>.<agent>.chats`              | One message per row in `chats`                           |
-| **Message**    | `wa.<company>.<agent>.messages.<chat_id>` | `<chat_id>` path segment enables per-thread subscription |
-| **Agent**      | `wa.<company>.<agent>.agents`             | Agent profile updates                                    |
+| **Chat list**  | `websocket.<company>.<agent>.chats`              | One message per row in `chats`                           |
+| **Message**    | `websocket.<company>.<agent>.messages.<chat_id>` | `<chat_id>` path segment enables per-thread subscription |
+| **Agent**      | `websocket.<company>.<agent>.agents`             | Agent profile updates                                    |
 
 > **Why** – `daisi-ws-service` subscribes exactly to these patterns, removing the need for payload inspection on the WebSocket layer.
 > > **Note** – Internal Redis route keys use shorthand `msg` (e.g. `route:<company>:<agent>:msg:<chat_id>`) while subjects always spell out `messages`
@@ -77,7 +77,7 @@ sequenceDiagram
             CDC -->> JS_CDC : Ack
         else first-seen
             RED -->> CDC : 1 (new)
-            CDC  -->> JS_WA : Publish wa.<C>.<A>.<logical>[.<chat_id>]
+            CDC  -->> JS_WA : Publish websocket.<C>.<A>.<logical>[.<chat_id>]
             CDC  -->> JS_CDC : Ack
         end
     end
@@ -222,7 +222,7 @@ sequenceDiagram
         CDC -->> JS_CDC: ACK (skip)
     else first-seen
         RED -->> CDC   : 1
-        CDC -->> JS_WA : Publish wa.Co1.Ag7.messages.123 {payload}
+        CDC -->> JS_WA : Publish websocket.Co1.Ag7.messages.123 {payload}
         alt publish error
             CDC -->> JS_CDC: NACK (publish failed)
             JS_CDC -->> CDC : redeliver after AckWait
@@ -268,7 +268,7 @@ sequenceDiagram
 
             %% STEP 6 — JetStream queue fan-out
             note over WS_A,WS_B: QueueSubscribe("", "ws_fanout", bind wa_stream)
-            JS_WA -->> WS_B   : wa.Co1.Ag7.messages.123
+            JS_WA -->> WS_B   : websocket.Co1.Ag7.messages.123
 
             alt WS_B owns socket
                 WS_B -->> Browser : JSON frame
@@ -318,7 +318,7 @@ This document translates the high-level Product Requirements Document (PRD) for 
 |-----|-------------|---------------------|
 | **FR-1** | *Schema-agnostic ingestion* | The service consumes **all** JetStream subjects matching `cdc.*.*` without prior schema knowledge. A new tenant or table shall not require code changes or redeploys. |
 | **FR-2** | *Table filter* | Messages whose `table` ∉ `{messages, chats, agents}` are acknowledged immediately (< 5 ms) and never published downstream. |
-| **FR-3** | *Transform & mapping* | For allowed tables, the service publishes **one** JSON event to `wa.<company>.<agent>.<logical>[.<chat_id>]` with required metadata fields (`agent_id`, `chat_id`, etc.). |
+| **FR-3** | *Transform & mapping* | For allowed tables, the service publishes **one** JSON event to `websocket.<company>.<agent>.<logical>[.<chat_id>]` with required metadata fields (`agent_id`, `chat_id`, etc.). |
 | **FR-4** | *Idempotent publish* | Duplicate CDC events **never** result in duplicate downstream events. Redis `SETNX` guard + event_id (`LSN:table:PK`) ensures exactly-once semantics within a 5-minute window. |
 | **FR-5** | *Back-pressure & retry* | On publish error the message is **not** acknowledged → JetStream redelivers after `AckWait=30 s`, max 3 redeliveries. Order is preserved. |
 | **FR-6** | *Observability* | Prometheus metrics (§ 9) are emitted; `/metrics` endpoint is exposed. Zap JSON logs include `trace_id`, `company`, `table`, `event_id`, `latency_ms`. |
@@ -370,7 +370,7 @@ flowchart LR
 |-----------|----------|-------------------|-------|
 | Inbound ← | NATS JetStream Push | `cdc.*.*` | Durable consumer `cdc_consumers`. |
 | Dedup ↔︎ | Redis `SETNX` | `dedup:{event_id}` | TTL = 300 s; single-shard LRU. |
-| Outbound → | NATS JetStream Pub | `wa.<C>.<A>.<logical>[.<chat_id>]` | Stream `wa_stream` (push). |
+| Outbound → | NATS JetStream Pub | `websocket.<C>.<A>.<logical>[.<chat_id>]` | Stream `wa_stream` (push). |
 | Metrics → | HTTP + Prometheus | `/metrics` | Scraped by Prometheus. |
 
 ---

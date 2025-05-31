@@ -85,13 +85,13 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	const testEnvPrefix = "DAISI_CDC_"
 	envKeysToSet := map[string]string{
-		testEnvPrefix + strings.ToUpper(config.KeyNatsURL):            s.natsURL,
-		testEnvPrefix + strings.ToUpper(config.KeyRedisAddr):          "redis://" + s.redisAddr,
-		testEnvPrefix + strings.ToUpper(config.KeyLogLevel):           "debug",
-		testEnvPrefix + strings.ToUpper(config.KeyMetricsPort):        "9099", // Test-specific port
-		testEnvPrefix + strings.ToUpper(config.KeyJSWaStreamName):     "test_wa_stream",
-		testEnvPrefix + strings.ToUpper(config.KeyJSCdcStreamName):    "test_cdc_events_stream",
-		testEnvPrefix + strings.ToUpper(config.KeyJSCdcConsumerGroup): "test_cdc_consumers",
+		testEnvPrefix + strings.ToUpper(config.KeyNatsURL):               s.natsURL,
+		testEnvPrefix + strings.ToUpper(config.KeyRedisAddr):             "redis://" + s.redisAddr,
+		testEnvPrefix + strings.ToUpper(config.KeyLogLevel):              "debug",
+		testEnvPrefix + strings.ToUpper(config.KeyMetricsPort):           "9099", // Test-specific port
+		testEnvPrefix + strings.ToUpper(config.KeyJSWebsocketStreamName): "test_wa_stream",
+		testEnvPrefix + strings.ToUpper(config.KeyJSCdcStreamName):       "test_cdc_events_stream",
+		testEnvPrefix + strings.ToUpper(config.KeyJSCdcConsumerGroup):    "test_cdc_consumers",
 	}
 	s.appMetricsPort = envKeysToSet[testEnvPrefix+strings.ToUpper(config.KeyMetricsPort)]
 
@@ -163,9 +163,9 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	s.receivedWaMessages = make(chan *natsIO.Msg, 100) // Buffer of 100 messages
 
-	waStreamSubjects := "wa.>" // Default, can be overridden by config if necessary for tests later
+	waStreamSubjects := "websocket.>" // Default, can be overridden by config if necessary for tests later
 	if s.appContainer != nil && s.appContainer.Cfg != nil {
-		cfgWaSubjects := s.appContainer.Cfg.GetString(config.KeyJSWaStreamSubjects)
+		cfgWaSubjects := s.appContainer.Cfg.GetString(config.KeyJSWebsocketStreamSubjects)
 		if cfgWaSubjects != "" {
 			waStreamSubjects = cfgWaSubjects
 		}
@@ -302,7 +302,7 @@ func (s *IntegrationTestSuite) TestAppNATSConnectionHealth() {
 	s.NoError(err, "Application's CDC stream '%s' should exist", streamName)
 	s.T().Logf("Application's CDC stream '%s' found.", streamName)
 
-	waStreamName := s.appContainer.Cfg.GetString(config.KeyJSWaStreamName)
+	waStreamName := s.appContainer.Cfg.GetString(config.KeyJSWebsocketStreamName)
 	s.Require().NotEmpty(waStreamName, "WA Stream name from app config should not be empty")
 	_, err = jsCtx.StreamInfo(waStreamName)
 	s.NoError(err, "Application's WA stream '%s' should exist", waStreamName)
@@ -458,8 +458,8 @@ func (s *IntegrationTestSuite) TestHappyPath_SingleMessage_MessagesTable() {
 		IsDeleted:        false,
 		MessageTimestamp: now.UnixMilli(),
 		MessageDate:      domain.CustomDate{Time: now},
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		// CreatedAt:        now,
+		// UpdatedAt:        now,
 	}
 
 	recordData := make(map[string]interface{})
@@ -617,7 +617,7 @@ func (s *IntegrationTestSuite) TestHappyPath_SingleMessage_MessagesTable() {
 	if enrichedPayload.CompanyID == "" || enrichedPayload.AgentID == "" || enrichedPayload.ChatID == "" {
 		s.T().Fatalf("enrichedPayload CompanyID, AgentID, or ChatID is empty, cannot assert cdc_consumer_events_published_total metric. CompanyID: '%s', AgentID: '%s', ChatID: '%s'", enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.ChatID)
 	}
-	expectedPublishedSubject := fmt.Sprintf("wa.%s.%s.messages.%s", enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.ChatID)
+	expectedPublishedSubject := fmt.Sprintf("websocket.%s.%s.messages.%s", enrichedPayload.CompanyID, enrichedPayload.AgentID, enrichedPayload.ChatID)
 
 	publishedCount, err := getMetricValue(s.T(), metricsBody, "cdc_consumer_events_published_total", map[string]string{"subject": expectedPublishedSubject, "status": "success"})
 	s.Require().NoError(err, "Failed to get metric cdc_consumer_events_published_total for subject %s", expectedPublishedSubject)
@@ -666,8 +666,8 @@ func (s *IntegrationTestSuite) TestDuplicateMessageHandling() {
 		IsDeleted:        false,
 		MessageTimestamp: now.UnixMilli(),
 		MessageDate:      domain.CustomDate{Time: now},
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		// CreatedAt:        now,
+		// UpdatedAt:        now,
 	}
 
 	recordData := make(map[string]interface{})
@@ -773,7 +773,7 @@ func (s *IntegrationTestSuite) TestDuplicateMessageHandling() {
 	s.Equal(float64(1), duplicateSkippedCount, "Expected 1 event skipped as duplicate for messages table, got %.f", duplicateSkippedCount)
 
 	// Metric: cdc_consumer_events_published_total (Ensure only one publish for the original successful event)
-	expectedPublishedSubject := fmt.Sprintf("wa.%s.%s.messages.%s",
+	expectedPublishedSubject := fmt.Sprintf("websocket.%s.%s.messages.%s",
 		enrichedPayload1.CompanyID,
 		enrichedPayload1.AgentID,
 		enrichedPayload1.ChatID,
@@ -975,14 +975,14 @@ func (s *IntegrationTestSuite) TestSkippedTableHandling() {
 // 	failCompanyID := "test-company-redelivery-fail"
 // 	failAgentID := "agent_redeliver_fail_def"
 // 	failChatID := "chat_redeliver_fail_456"
-// 	expectedFailingPublishSubject := fmt.Sprintf("wa.%s.%s.%s.%s", failCompanyID, failAgentID, testTableName, failChatID)
+// 	expectedFailingPublishSubject := fmt.Sprintf("websocket.%s.%s.%s.%s", failCompanyID, failAgentID, testTableName, failChatID)
 
 // 	initialPublishFailureCountNATS, _ := getMetricValue(s.T(), initialMetricsBody, "cdc_consumer_events_published_total", map[string]string{"status": "failure", "subject": expectedFailingPublishSubject})
 // 	initialProcessErrorCountNATS, _ := getMetricValue(s.T(), initialMetricsBody, "cdc_consumer_events_total", map[string]string{"table": testTableName, "result": "publish_error"})
 
 // 	// 2. Configure wa_stream to be "full" to reject later publish attempts
 // 	s.T().Log("Configuring wa_stream to be full to induce publish failures...")
-// 	waStreamName := s.appContainer.Cfg.GetString(config.KeyJSWaStreamName)
+// 	waStreamName := s.appContainer.Cfg.GetString(config.KeyJSWebsocketStreamName)
 // 	jsCtx, err := s.waNatsConn.JetStream()
 // 	s.Require().NoError(err, "Failed to get JetStream context on waNatsConn for stream config")
 

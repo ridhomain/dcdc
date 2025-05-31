@@ -164,7 +164,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 				assert.Equal(t, expectedMessageID, payload.RowData["message_id"])
 			},
-			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID),
+			expectedTargetSubject: fmt.Sprintf("websocket.%s.%s.messages.%s", companyID, agentID, chatID),
 			expectedEventID:       fmt.Sprintf("%d:messages:%s", lsnVal, messageID),
 			expectedError:         nil,
 		},
@@ -190,7 +190,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, cdcEventDataOriginalRecord, payload.RowData)
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 			},
-			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.chats", companyID, agentID),
+			expectedTargetSubject: fmt.Sprintf("websocket.%s.%s.chats", companyID, agentID),
 			expectedEventID:       fmt.Sprintf("%d:chats:%s", lsnVal, chatID),
 			expectedError:         nil,
 		},
@@ -216,7 +216,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, cdcEventDataOriginalRecord, payload.RowData)
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 			},
-			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.agents", companyID, agentID),
+			expectedTargetSubject: fmt.Sprintf("websocket.%s.%s.agents", companyID, agentID),
 			expectedEventID:       fmt.Sprintf("%d:agents:%s", lsnVal, agentID),
 			expectedError:         nil,
 		},
@@ -253,7 +253,7 @@ func TestTransformService_TransformAndEnrich(t *testing.T) {
 				assert.Equal(t, expectedCompanyID, payload.RowData["company_id"])
 				assert.Equal(t, expectedMessageID, payload.RowData["message_id"])
 			},
-			expectedTargetSubject: fmt.Sprintf("wa.%s.%s.messages.%s", companyID, agentID, chatID),
+			expectedTargetSubject: fmt.Sprintf("websocket.%s.%s.messages.%s", companyID, agentID, chatID),
 			expectedEventID:       fmt.Sprintf("%d:messages:%s", lsnVal, messageID),
 			expectedError:         nil,
 		},

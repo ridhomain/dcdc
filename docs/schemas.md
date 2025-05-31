@@ -114,21 +114,21 @@ Refer to `internal/domain/model.go` for the exact Go struct definitions which co
 
 ## 2. NATS Publish Subject Patterns
 
-The service publishes enriched events to a NATS JetStream currently named **`wa_stream`** (this can be configured via the `DAISI_CDC_JS_WA_STREAM_NAME` environment variable).
+The service publishes enriched events to a NATS JetStream currently named **`wa_stream`** (this can be configured via the `DAISI_CDC_js_websocket_stream_name` environment variable).
 
 The subject patterns depend on the source table of the CDC event:
 
 *   **For `messages` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.messages.<chat_id>`
-    *   Example: `wa.company_xyz.agent_123.messages.chat_abc`
+    *   Pattern: `websocket.<company_id>.<agent_id>.messages.<chat_id>`
+    *   Example: `websocket.company_xyz.agent_123.messages.chat_abc`
 
 *   **For `chats` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.chats`
-    *   Example: `wa.company_xyz.agent_123.chats`
+    *   Pattern: `websocket.<company_id>.<agent_id>.chats`
+    *   Example: `websocket.company_xyz.agent_123.chats`
 
 *   **For `agents` table events:**
-    *   Pattern: `wa.<company_id>.<agent_id>.agents`
-    *   Example: `wa.company_xyz.agent_123.agents`
+    *   Pattern: `websocket.<company_id>.<agent_id>.agents`
+    *   Example: `websocket.company_xyz.agent_123.agents`
 
 Where:
 *   `<company_id>`: The ID of the company associated with the event.

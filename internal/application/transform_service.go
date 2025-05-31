@@ -35,7 +35,6 @@ func NewTransformService(logger domain.Logger, metricsSink domain.MetricsSink) E
 
 // populateTypedDataAndGetUnhandledFields processes the raw record into a typed struct
 // and identifies unhandled fields.
-// This function is moved from consumer.go
 func (ts *transformService) populateTypedDataAndGetUnhandledFields(rawRecord map[string]interface{}, tableName string, typedDataTarget interface{}) (unhandledFields []string, err error) {
 	if rawRecord == nil {
 		return nil, domain.NewErrDataProcessing("populate_typed_data", tableName, errors.New("record is nil"))
@@ -58,6 +57,8 @@ func (ts *transformService) populateTypedDataAndGetUnhandledFields(rawRecord map
 		knownJsonFields = td.GetKnownJSONFields()
 	case *domain.MessageData:
 		knownJsonFields = td.GetKnownJSONFields()
+	case *domain.ContactData:
+		knownJsonFields = td.GetKnownJSONFields()
 	default:
 		return nil, domain.NewErrDataProcessing("get_known_fields_unknown_type", tableName, fmt.Errorf("unknown typedDataTarget type: %T", td))
 	}
@@ -74,7 +75,6 @@ func (ts *transformService) populateTypedDataAndGetUnhandledFields(rawRecord map
 }
 
 // extractPKValue now uses the typed data structs.
-// This function is moved from consumer.go
 func (ts *transformService) extractPKValue(typedData interface{}, tableName string) (string, error) {
 	switch data := typedData.(type) {
 	case *domain.MessageData:
@@ -92,6 +92,11 @@ func (ts *transformService) extractPKValue(typedData interface{}, tableName stri
 			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
 		}
 		return data.AgentID, nil
+	case *domain.ContactData:
+		if data.ID == "" {
+			return "", domain.NewErrDataProcessing("extract_pk", tableName, domain.ErrPKEmpty)
+		}
+		return data.ID, nil
 	default:
 		return "", domain.NewErrDataProcessing("extract_pk_unknown_type", tableName, fmt.Errorf("cannot extract PK from unknown typed data structure %T", typedData))
 	}
@@ -124,6 +129,8 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 		typedDataForTable = new(domain.ChatData)
 	case "messages":
 		typedDataForTable = new(domain.MessageData)
+	case "contacts":
+		typedDataForTable = new(domain.ContactData)
 	default:
 		ts.logger.Error(ctx, "Unknown table name for typed data unmarshalling", zap.String("authoritative_table_name", authoritativeTableName))
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Sentinel error
@@ -157,7 +164,7 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 	eventIDStr := fmt.Sprintf("%s:%s:%s", commitLSNStr, authoritativeTableName, pkValueStr) // Use authoritativeTableName
 	// Note: eventID is part of EnrichedEventPayload, context update for logging happens in consumer or by logger itself.
 
-	// Extract agent_id, chat_id, and authoritativeCompanyID from payload.
+	// Extract agent_id, chat_id, message_id, and authoritativeCompanyID from payload.
 	var agentID, chatID, messageID, authoritativeCompanyID string
 	switch data := cdcEventData.TypedData.(type) {
 	case *domain.AgentData:
@@ -171,6 +178,9 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 		agentID = data.AgentID
 		chatID = data.ChatID
 		messageID = data.MessageID
+		authoritativeCompanyID = data.CompanyID
+	case *domain.ContactData:
+		agentID = data.AgentID
 		authoritativeCompanyID = data.CompanyID
 	default:
 		ts.logger.Error(ctx, "Unhandled typed data structure for ID extraction")
@@ -206,11 +216,11 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 			ts.logger.Error(ctx, domain.ErrChatIDMissingForMessages.Error(), zap.String("table", authoritativeTableName))
 			return nil, "", nil, domain.ErrChatIDMissingForMessages
 		}
-		targetSubject = fmt.Sprintf("wa.%s.%s.messages.%s", authoritativeCompanyID, agentID, chatID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.messages.%s", authoritativeCompanyID, agentID, chatID)
 	case "chats":
-		targetSubject = fmt.Sprintf("wa.%s.%s.chats", authoritativeCompanyID, agentID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.chats", authoritativeCompanyID, agentID)
 	case "agents":
-		targetSubject = fmt.Sprintf("wa.%s.%s.agents", authoritativeCompanyID, agentID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.agents", authoritativeCompanyID, agentID)
 	default:
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Should have been caught earlier
 	}
