@@ -206,11 +206,11 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 			ts.logger.Error(ctx, domain.ErrChatIDMissingForMessages.Error(), zap.String("table", authoritativeTableName))
 			return nil, "", nil, domain.ErrChatIDMissingForMessages
 		}
-		targetSubject = fmt.Sprintf("wa.%s.%s.messages.%s", authoritativeCompanyID, agentID, chatID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.messages.%s", authoritativeCompanyID, agentID, chatID)
 	case "chats":
-		targetSubject = fmt.Sprintf("wa.%s.%s.chats", authoritativeCompanyID, agentID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.chats", authoritativeCompanyID, agentID)
 	case "agents":
-		targetSubject = fmt.Sprintf("wa.%s.%s.agents", authoritativeCompanyID, agentID)
+		targetSubject = fmt.Sprintf("websocket.%s.%s.agents", authoritativeCompanyID, agentID)
 	default:
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Should have been caught earlier
 	}

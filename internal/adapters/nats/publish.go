@@ -45,14 +45,14 @@ func NewJetStreamPublisher(
 
 	// Ensure the target stream (e.g., "wa_stream") exists.
 	// This makes the publisher more robust, as it can create the stream if it's missing.
-	waStreamName := cfg.GetString(config.KeyJSWaStreamName) // Assumed key: "nats.wa_stream.name"
+	waStreamName := cfg.GetString(config.KeyJSWebsocketStreamName) // Assumed key: "nats.wa_stream.name"
 	if waStreamName == "" {
 		waStreamName = "wa_stream" // Default if not configured
 		logger.Info(context.Background(), "NATS_WA_STREAM_NAME not configured, using default", zap.String("default_stream_name", waStreamName))
 	}
-	waStreamSubjectsCSV := cfg.GetString(config.KeyJSWaStreamSubjects) // Assumed key: "nats.wa_stream.subjects"
+	waStreamSubjectsCSV := cfg.GetString(config.KeyJSWebsocketStreamSubjects) // Assumed key: "nats.wa_stream.subjects"
 	if waStreamSubjectsCSV == "" {
-		waStreamSubjectsCSV = "wa.>" // Default, allowing any subject starting with "wa."
+		waStreamSubjectsCSV = "websocket.>" // Default, allowing any subject starting with "websocket."
 		logger.Info(context.Background(), "NATS_WA_STREAM_SUBJECTS not configured, using default", zap.String("default_stream_subjects_csv", waStreamSubjectsCSV))
 	}
 	waStreamSubjects := strings.Split(waStreamSubjectsCSV, ",")
