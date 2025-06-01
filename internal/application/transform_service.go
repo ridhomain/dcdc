@@ -221,6 +221,8 @@ func (ts *transformService) TransformAndEnrich(ctx context.Context, cdcEventData
 		targetSubject = fmt.Sprintf("websocket.%s.%s.chats", authoritativeCompanyID, agentID)
 	case "agents":
 		targetSubject = fmt.Sprintf("websocket.%s.%s.agents", authoritativeCompanyID, agentID)
+	case "contacts":
+		targetSubject = fmt.Sprintf("websocket.%s.%s.contacts", authoritativeCompanyID, agentID)
 	default:
 		return nil, "", nil, domain.ErrUnknownTableNameForTransform // Should have been caught earlier
 	}
